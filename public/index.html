@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survival Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+        }
+
+        #login-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        #login-screen h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+            color: #e94560;
+            text-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+        }
+
+        #login-screen input {
+            padding: 15px 30px;
+            font-size: 20px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            margin-bottom: 20px;
+            width: 300px;
+            text-align: center;
+        }
+
+        #login-screen input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        #login-screen button {
+            padding: 15px 50px;
+            font-size: 20px;
+            border: none;
+            border-radius: 8px;
+            background: #e94560;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        #login-screen button:hover {
+            background: #ff6b6b;
+            transform: scale(1.05);
+        }
+
+        #game-container {
+            display: none;
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: #0f0f1a;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+        }
+
+        .ui-panel {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .ui-panel h3 {
+            color: #e94560;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .ui-panel .value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #wave-timer {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 30px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        #wave-timer .wave-num {
+            color: #e94560;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        #wave-timer .timer {
+            color: #fff;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        #build-menu {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 20px;
+            border-radius: 8px;
+            display: flex;
+            gap: 15px;
+            pointer-events: none;
+        }
+
+        .build-option {
+            text-align: center;
+            padding: 10px 15px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+
+        .build-option.active {
+            background: #e94560;
+            transform: scale(1.1);
+        }
+
+        .build-option .key {
+            font-size: 20px;
+            font-weight: bold;
+            color: #e94560;
+        }
+
+        .build-option .name {
+            font-size: 14px;
+            margin: 5px 0;
+        }
+
+        .build-option .cost {
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        #minimap {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            border: 2px solid #e94560;
+        }
+
+        #death-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+
+        #death-screen h1 {
+            font-size: 48px;
+            color: #e94560;
+            margin-bottom: 20px;
+        }
+
+        #death-screen button {
+            padding: 15px 50px;
+            font-size: 20px;
+            border: none;
+            border-radius: 8px;
+            background: #e94560;
+            color: #fff;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="login-screen">
+        <h1>SURVIVAL</h1>
+        <input type="text" id="nickname-input" placeholder="Enter nickname" maxlength="15">
+        <button id="join-btn">JOIN GAME</button>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="ui-overlay">
+            <div class="ui-panel">
+                <h3>HEALTH</h3>
+                <div class="value" id="hp-display">100</div>
+            </div>
+            <div class="ui-panel">
+                <h3>MONEY</h3>
+                <div class="value" id="money-display">100</div>
+            </div>
+        </div>
+
+        <div id="wave-timer">
+            <div class="wave-num">WAVE <span id="wave-num">0</span></div>
+            <div class="timer" id="wave-timer-val">2:00</div>
+        </div>
+
+        <div id="build-menu">
+            <div class="build-option" data-type="wall">
+                <div class="key">1</div>
+                <div class="name">Wall</div>
+                <div class="cost">50</div>
+            </div>
+            <div class="build-option" data-type="turret">
+                <div class="key">2</div>
+                <div class="name">Turret</div>
+                <div class="cost">100</div>
+            </div>
+            <div class="build-option" data-type="dril">
+                <div class="key">3</div>
+                <div class="name">Dril</div>
+                <div class="cost">150</div>
+            </div>
+            <div class="build-option" data-type="mine">
+                <div class="key">4</div>
+                <div class="name">Mine</div>
+                <div class="cost">75</div>
+            </div>
+        </div>
+
+        <canvas id="minimap"></canvas>
+    </div>
+
+    <div id="death-screen">
+        <h1>YOU DIED</h1>
+        <button id="respawn-btn">RESPAWN</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
