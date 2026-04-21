@@ -17,8 +17,14 @@ const gameState = {
     monsters: [],
     bullets: [],
     resourcePoints: [],
-    myPlayer: null
+    myPlayer: null,
+    lastServerUpdate: 0,
+    renderTime: 0
 };
+
+const smoothPlayers = {};
+const smoothMonsters = {};
+const smoothBuildings = {};
 
 const keys = {
     w: false,
@@ -139,6 +145,7 @@ socket.on('gameState', (state) => {
     gameState.bullets = state.bullets;
     gameState.wave = state.wave;
     gameState.nextWaveTime = state.nextWaveTime;
+    gameState.lastServerUpdate = performance.now();
 });
 
 socket.on('resourceGenerated', (data) => {
@@ -302,6 +309,29 @@ function update() {
 
     document.getElementById('hp-display').textContent = Math.floor(player.hp);
     document.getElementById('money-display').textContent = player.money;
+
+    smoothPlayers[gameState.playerId] = {
+        x: player.x,
+        y: player.y,
+        angle: player.angle
+    };
+}
+
+function getSmoothPos(entity, type) {
+    const smooth = type === 'player' ? smoothPlayers : (type === 'monster' ? smoothMonsters : smoothBuildings);
+    const prev = smooth[entity.id];
+
+    if (!prev) {
+        smooth[entity.id] = { x: entity.x, y: entity.y, angle: entity.angle || 0 };
+        return { x: entity.x, y: entity.y, angle: entity.angle || 0 };
+    }
+
+    const lerp = 0.3;
+    prev.x += (entity.x - prev.x) * lerp;
+    prev.y += (entity.y - prev.y) * lerp;
+    prev.angle = entity.angle || prev.angle;
+
+    return prev;
 }
 
 function render() {
@@ -328,10 +358,11 @@ function render() {
 }
 
 function drawGrid() {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    const gridSize = 100;
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.lineWidth = 1;
 
-    const gridSize = 100;
     const startX = Math.floor(camera.x / gridSize) * gridSize;
     const startY = Math.floor(camera.y / gridSize) * gridSize;
 
@@ -348,6 +379,10 @@ function drawGrid() {
         ctx.lineTo(camera.x + canvas.width, y);
         ctx.stroke();
     }
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, gameState.mapWidth, gameState.mapHeight);
 }
 
 function drawResourcePoints() {
@@ -356,18 +391,24 @@ function drawResourcePoints() {
             rp.y < camera.y - rp.radius || rp.y > camera.y + canvas.height + rp.radius) return;
 
         const gradient = ctx.createRadialGradient(rp.x, rp.y, 0, rp.x, rp.y, rp.radius);
-        gradient.addColorStop(0, 'rgba(0, 255, 100, 0.8)');
+        gradient.addColorStop(0, 'rgba(0, 255, 100, 0.9)');
+        gradient.addColorStop(0.5, 'rgba(0, 255, 100, 0.3)');
         gradient.addColorStop(1, 'rgba(0, 255, 100, 0)');
 
+        ctx.shadowColor = '#0f0';
+        ctx.shadowBlur = 20;
         ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(rp.x, rp.y, rp.radius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
 
-        ctx.fillStyle = '#0f0';
-        ctx.font = '12px Arial';
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px Arial';
         ctx.textAlign = 'center';
+        ctx.globalAlpha = 0.7;
         ctx.fillText('RESOURCE', rp.x, rp.y + 4);
+        ctx.globalAlpha = 1;
     });
 }
 
@@ -376,9 +417,20 @@ function drawBuildings() {
         if (b.x < camera.x - 50 || b.x > camera.x + canvas.width + 50 ||
             b.y < camera.y - 50 || b.y > camera.y + canvas.height + 50) return;
 
+        const colors = {
+            wall: '#888',
+            turret: '#4488ff',
+            dril: '#ff8844',
+            mine: '#44ff88'
+        };
+        const color = colors[b.type];
+
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 10;
+
         switch (b.type) {
             case 'wall':
-                ctx.fillStyle = '#888';
+                ctx.fillStyle = color;
                 ctx.fillRect(b.x - 20, b.y - 20, 40, 40);
                 ctx.strokeStyle = '#aaa';
                 ctx.lineWidth = 2;
@@ -386,7 +438,7 @@ function drawBuildings() {
                 break;
 
             case 'turret':
-                ctx.fillStyle = '#4488ff';
+                ctx.fillStyle = color;
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, 15, 0, Math.PI * 2);
                 ctx.fill();
@@ -397,7 +449,7 @@ function drawBuildings() {
                 break;
 
             case 'dril':
-                ctx.fillStyle = '#ff8844';
+                ctx.fillStyle = color;
                 ctx.beginPath();
                 ctx.moveTo(b.x, b.y - 20);
                 ctx.lineTo(b.x + 15, b.y + 15);
@@ -407,7 +459,7 @@ function drawBuildings() {
                 break;
 
             case 'mine':
-                ctx.fillStyle = '#44ff88';
+                ctx.fillStyle = color;
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, 12, 0, Math.PI * 2);
                 ctx.fill();
@@ -416,6 +468,8 @@ function drawBuildings() {
                 ctx.stroke();
                 break;
         }
+
+        ctx.shadowBlur = 0;
 
         const hpPercent = b.hp / b.maxHp;
         if (hpPercent < 1) {
@@ -429,31 +483,47 @@ function drawBuildings() {
 
 function drawMonsters() {
     gameState.monsters.forEach(m => {
-        if (m.x < camera.x - 30 || m.x > camera.x + canvas.width + 30 ||
-            m.y < camera.y - 30 || m.y > camera.y + canvas.height + 30) return;
+        const smooth = getSmoothPos(m, 'monster');
+
+        if (smooth.x < camera.x - 30 || smooth.x > camera.x + canvas.width + 30 ||
+            smooth.y < camera.y - 30 || smooth.y > camera.y + canvas.height + 30) return;
 
         if (m.type === 'basic') {
+            ctx.shadowColor = '#e94560';
+            ctx.shadowBlur = 10;
             ctx.fillStyle = '#e94560';
             ctx.beginPath();
-            ctx.arc(m.x, m.y, 12, 0, Math.PI * 2);
+            ctx.arc(smooth.x, smooth.y, 12, 0, Math.PI * 2);
             ctx.fill();
+            ctx.shadowBlur = 0;
 
             ctx.fillStyle = '#ff6688';
             ctx.beginPath();
-            ctx.arc(m.x - 4, m.y - 4, 3, 0, Math.PI * 2);
-            ctx.arc(m.x + 4, m.y - 4, 3, 0, Math.PI * 2);
+            ctx.arc(smooth.x - 4, smooth.y - 4, 3, 0, Math.PI * 2);
+            ctx.arc(smooth.x + 4, smooth.y - 4, 3, 0, Math.PI * 2);
             ctx.fill();
         } else if (m.type === 'strong') {
+            ctx.shadowColor = '#ff0000';
+            ctx.shadowBlur = 15;
             ctx.fillStyle = '#ff0000';
             ctx.beginPath();
-            ctx.arc(m.x, m.y, 18, 0, Math.PI * 2);
+            ctx.arc(smooth.x, smooth.y, 18, 0, Math.PI * 2);
             ctx.fill();
+            ctx.shadowBlur = 0;
 
             ctx.fillStyle = '#ff4444';
             ctx.beginPath();
-            ctx.arc(m.x - 5, m.y - 5, 5, 0, Math.PI * 2);
-            ctx.arc(m.x + 5, m.y - 5, 5, 0, Math.PI * 2);
+            ctx.arc(smooth.x - 5, smooth.y - 5, 5, 0, Math.PI * 2);
+            ctx.arc(smooth.x + 5, smooth.y - 5, 5, 0, Math.PI * 2);
             ctx.fill();
+        }
+
+        const hpPercent = m.hp / m.maxHp;
+        if (hpPercent < 1) {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(smooth.x - 15, smooth.y - 25, 30, 4);
+            ctx.fillStyle = '#f44';
+            ctx.fillRect(smooth.x - 15, smooth.y - 25, 30 * hpPercent, 4);
         }
     });
 }
@@ -463,34 +533,53 @@ function drawBullets() {
         if (b.x < camera.x - 20 || b.x > camera.x + canvas.width + 20 ||
             b.y < camera.y - 20 || b.y > camera.y + canvas.height + 20) return;
 
-        ctx.fillStyle = b.isTurret ? '#88f' : '#ff0';
+        const color = b.isTurret ? '#88f' : '#ff0';
+
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x - Math.cos(b.angle) * 15, b.y - Math.sin(b.angle) * 15);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
     });
 }
 
 function drawPlayers() {
     Object.values(gameState.players).forEach(p => {
-        if (p.x < camera.x - 25 || p.x > camera.x + canvas.width + 25 ||
-            p.y < camera.y - 25 || p.y > camera.y + canvas.height + 25) return;
+        const smooth = getSmoothPos(p, 'player');
+
+        if (smooth.x < camera.x - 25 || smooth.x > camera.x + canvas.width + 25 ||
+            smooth.y < camera.y - 25 || smooth.y > camera.y + canvas.height + 25) return;
 
         const isMe = p.id === gameState.playerId;
         const color = isMe ? '#00ff88' : '#4488ff';
 
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 15;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+        ctx.arc(smooth.x, smooth.y, 15, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
 
-        if (p.angle) {
+        if (smooth.angle) {
             ctx.strokeStyle = color;
             ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
+            ctx.moveTo(smooth.x, smooth.y);
             ctx.lineTo(
-                p.x + Math.cos(p.angle) * 20,
-                p.y + Math.sin(p.angle) * 20
+                smooth.x + Math.cos(smooth.angle) * 20,
+                smooth.y + Math.sin(smooth.angle) * 20
             );
             ctx.stroke();
         }
@@ -498,13 +587,13 @@ function drawPlayers() {
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(p.nickname, p.x, p.y - 25);
+        ctx.fillText(p.nickname, smooth.x, smooth.y - 25);
 
         const hpPercent = p.hp / p.maxHp;
         ctx.fillStyle = '#333';
-        ctx.fillRect(p.x - 20, p.y - 18, 40, 6);
+        ctx.fillRect(smooth.x - 20, smooth.y - 18, 40, 6);
         ctx.fillStyle = hpPercent > 0.5 ? '#4f4' : (hpPercent > 0.25 ? '#ff4' : '#f44');
-        ctx.fillRect(p.x - 20, p.y - 18, 40 * hpPercent, 6);
+        ctx.fillRect(smooth.x - 20, smooth.y - 18, 40 * hpPercent, 6);
     });
 }
 
