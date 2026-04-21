@@ -1,5 +1,5 @@
 // =============================================
-// SURVIVAL GAME - CLIENT.JS
+// SURVIVAL ARENA - CLIENT
 // =============================================
 
 const socket = io();
@@ -8,40 +8,32 @@ const socket = io();
 // GAME STATE
 // =============================================
 
-const gameState = {
-    playerId: null,
-    mapWidth: 2000,
-    mapHeight: 2000,
+const game = {
+    id: null,
+    mapWidth: 3000,
+    mapHeight: 3000,
     players: {},
     buildings: [],
     monsters: [],
     bullets: [],
-    resourcePoints: [],
     myPlayer: null,
-    lastServerUpdate: 0,
-    renderTime: 0
+    status: 'waiting'
 };
 
 const smoothPlayers = {};
 const smoothMonsters = {};
 const smoothBuildings = {};
 
-const keys = {
-    w: false,
-    a: false,
-    s: false,
-    d: false
-};
-
+let keys = { w: false, a: false, s: false, d: false };
 let selectedBuild = null;
-let mouseX = 0;
-let mouseY = 0;
+let selectedWeapon = 'gun';
+let mouseX = 0, mouseY = 0;
 let camera = { x: 0, y: 0 };
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const minimap = document.getElementById('minimap');
-const minimapCtx = minimap.getContext('2d');
+const minimapCanvas = document.getElementById('minimap');
+const mmCtx = minimapCanvas.getContext('2d');
 
 // =============================================
 // INITIALIZATION
@@ -51,6 +43,7 @@ function init() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
+    document.getElementById('create-btn').addEventListener('click', createGame);
     document.getElementById('join-btn').addEventListener('click', joinGame);
     document.getElementById('nickname-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') joinGame();
@@ -63,146 +56,138 @@ function init() {
     });
 }
 
-function joinGame() {
-    const nickname = document.getElementById('nickname-input').value.trim();
-    if (!nickname) return;
+function createGame() {
+    const nick = document.getElementById('nickname-input').value.trim();
+    if (!nick) return showError('Enter nickname!');
+    socket.emit('createGame', nick);
+}
 
-    socket.emit('join', nickname);
+function joinGame() {
+    const nick = document.getElementById('nickname-input').value.trim();
+    if (!nick) return showError('Enter nickname!');
+    socket.emit('join', nick);
 }
 
 function respawn() {
     document.getElementById('death-screen').style.display = 'none';
-    socket.emit('join', document.getElementById('nickname-input').value.trim());
+    const nick = document.getElementById('nickname-input').value.trim();
+    socket.emit('join', nick);
 }
 
 // =============================================
 // SOCKET EVENTS
 // =============================================
 
-socket.on('init', (data) => {
-    gameState.playerId = data.id;
-    gameState.mapWidth = data.mapWidth;
-    gameState.mapHeight = data.mapHeight;
-    gameState.resourcePoints = data.resourcePoints;
+socket.on('gameStatus', (data) => {
+    const statusEl = document.getElementById('lobby-status');
+    const createBtn = document.getElementById('create-btn');
+    const joinBtn = document.getElementById('join-btn');
 
-    document.getElementById('login-screen').style.display = 'none';
+    if (data.status === 'waiting') {
+        statusEl.style.display = 'block';
+        statusEl.className = 'lobby-status waiting';
+        statusEl.textContent = `Waiting for players... (${data.playerCount} connected)`;
+
+        createBtn.style.display = data.playerCount === 0 ? 'block' : 'none';
+        joinBtn.textContent = data.playerCount === 0 ? 'CREATE NEW GAME' : 'JOIN GAME';
+    } else if (data.status === 'playing' || data.status === 'paused') {
+        statusEl.style.display = 'block';
+        statusEl.className = 'lobby-status playing';
+        statusEl.textContent = 'Game in progress!';
+        joinBtn.textContent = 'JOIN GAME';
+    }
+});
+
+socket.on('gameStarted', () => {
+    document.getElementById('lobby-screen').style.display = 'none';
     document.getElementById('game-container').style.display = 'block';
 });
 
+socket.on('init', (data) => {
+    game.id = data.id;
+    game.mapWidth = data.mapWidth;
+    game.mapHeight = data.mapHeight;
+});
+
 socket.on('playerJoined', (player) => {
-    gameState.players[player.id] = player;
+    game.players[player.id] = player;
+    smoothPlayers[player.id] = { x: player.x, y: player.y, angle: player.angle };
 });
 
 socket.on('playerLeft', (id) => {
-    delete gameState.players[id];
+    delete game.players[id];
+    delete smoothPlayers[id];
 });
 
 socket.on('playerRespawned', (id) => {
-    if (id === gameState.playerId) {
-        gameState.myPlayer.hp = gameState.myPlayer.maxHp;
-        gameState.myPlayer.x = Math.random() * gameState.mapWidth;
-        gameState.myPlayer.y = Math.random() * gameState.mapHeight;
-        document.getElementById('death-screen').style.display = 'none';
+    if (id === game.id && game.players[id]) {
+        const p = game.players[id];
+        p.hp = p.maxHp;
+        p.x = game.mapWidth / 2 + (Math.random() - 0.5) * 60;
+        p.y = game.mapHeight / 2 + (Math.random() - 0.5) * 60;
     }
 });
 
 socket.on('buildingCreated', (building) => {
-    gameState.buildings.push(building);
+    game.buildings.push(building);
+    smoothBuildings[building.id] = { x: building.x, y: building.y };
 });
 
 socket.on('buildingRemoved', (id) => {
-    gameState.buildings = gameState.buildings.filter(b => b.id !== id);
+    game.buildings = game.buildings.filter(b => b.id !== id);
+    delete smoothBuildings[id];
 });
 
 socket.on('monsterCreated', (monster) => {
-    gameState.monsters.push(monster);
+    game.monsters.push(monster);
+    smoothMonsters[monster.id] = { x: monster.x, y: monster.y };
 });
 
 socket.on('monsterRemoved', (id) => {
-    gameState.monsters = gameState.monsters.filter(m => m.id !== id);
+    game.monsters = game.monsters.filter(m => m.id !== id);
+    delete smoothMonsters[id];
 });
 
 socket.on('bulletCreated', (bullet) => {
-    gameState.bullets.push(bullet);
+    game.bullets.push(bullet);
 });
 
 socket.on('bulletRemoved', (id) => {
-    gameState.bullets = gameState.bullets.filter(b => b.id !== id);
+    game.bullets = game.bullets.filter(b => b.id !== id);
 });
 
 socket.on('waveStart', (data) => {
-    showWaveNotification(data.wave);
+    showNotification(`WAVE ${data.wave}`, 'info');
 });
 
 socket.on('timer', (data) => {
-    updateTimer(data.nextWaveTime);
+    const mins = Math.floor(data.nextWaveTime / 60);
+    const secs = data.nextWaveTime % 60;
+    document.getElementById('wave-timer-val').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    document.getElementById('wave-num').textContent = data.waveNumber;
 });
 
 socket.on('gameState', (state) => {
-    gameState.players = state.players;
-    gameState.buildings = state.buildings;
-    gameState.monsters = state.monsters;
-    gameState.bullets = state.bullets;
-    gameState.wave = state.wave;
-    gameState.nextWaveTime = state.nextWaveTime;
-    gameState.lastServerUpdate = performance.now();
+    game.players = state.players;
+    game.buildings = state.buildings;
+    game.monsters = state.monsters;
+    game.bullets = state.bullets;
+    game.status = state.status;
 });
 
-socket.on('resourceGenerated', (data) => {
-});
+socket.on('error', (msg) => showError(msg));
+socket.on('buildError', (msg) => showError(msg));
 
-socket.on('error', (msg) => {
-    showNotification(msg, '#ff4444');
-});
-
-socket.on('buildError', (msg) => {
-    showNotification(msg, '#ff8844');
-});
-
-function showNotification(msg, color = '#fff') {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        bottom: 100px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 18px;
-        color: ${color};
-        font-weight: bold;
-        z-index: 200;
-        animation: fadeOut 2s forwards;
-    `;
-    notification.textContent = msg;
-    document.body.appendChild(notification);
-
-    setTimeout(() => notification.remove(), 2000);
+function showError(msg) {
+    showNotification(msg, 'error');
 }
 
-function showWaveNotification(wave) {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        font-size: 48px;
-        color: #e94560;
-        font-weight: bold;
-        text-shadow: 0 0 20px rgba(233, 69, 96, 0.8);
-        z-index: 200;
-        animation: fadeOut 3s forwards;
-    `;
-    notification.textContent = `WAVE ${wave}`;
-    document.body.appendChild(notification);
-
-    setTimeout(() => notification.remove(), 3000);
-}
-
-function updateTimer(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    document.getElementById('wave-timer-val').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-    document.getElementById('wave-num').textContent = gameState.wave || 0;
+function showNotification(msg, type = 'info') {
+    const el = document.createElement('div');
+    el.className = `notification ${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2000);
 }
 
 // =============================================
@@ -213,12 +198,15 @@ document.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
     if (keys.hasOwnProperty(key)) keys[key] = true;
 
-    if (key === '1') selectedBuild = 'wall';
-    if (key === '2') selectedBuild = 'turret';
-    if (key === '3') selectedBuild = 'dril';
-    if (key === '4') selectedBuild = 'mine';
+    if (key === 'q') { selectedWeapon = 'gun'; updateHotbar(); }
+    if (key === 'e') { selectedWeapon = 'gun'; updateHotbar(); }
 
-    updateBuildMenu();
+    if (key === '1') { selectedBuild = selectedBuild === 'wall' ? null : 'wall'; updateBuildMenu(); }
+    if (key === '2') { selectedBuild = selectedBuild === 'turret' ? null : 'turret'; updateBuildMenu(); }
+    if (key === '3') { selectedBuild = selectedBuild === 'dril' ? null : 'dril'; updateBuildMenu(); }
+    if (key === '4') { selectedBuild = selectedBuild === 'mine' ? null : 'mine'; updateBuildMenu(); }
+
+    document.getElementById('build-menu').classList.toggle('visible', selectedBuild !== null);
 });
 
 document.addEventListener('keyup', (e) => {
@@ -229,36 +217,45 @@ document.addEventListener('keyup', (e) => {
 canvas.addEventListener('mousemove', (e) => {
     mouseX = e.clientX;
     mouseY = e.clientY;
+    updateCrosshair(e);
 });
 
 canvas.addEventListener('click', (e) => {
-    if (!gameState.myPlayer || !selectedBuild) return;
-
-    const worldX = mouseX + camera.x;
-    const worldY = mouseY + camera.y;
+    if (!game.myPlayer || !selectedBuild) return;
 
     socket.emit('build', {
         type: selectedBuild,
-        x: worldX,
-        y: worldY
+        x: mouseX + camera.x,
+        y: mouseY + camera.y
     });
 });
 
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    if (!game.myPlayer) return;
 
-    if (!gameState.myPlayer) return;
-
-    const angle = Math.atan2(mouseY + camera.y - gameState.myPlayer.y, mouseX + camera.x - gameState.myPlayer.x);
+    const angle = Math.atan2(mouseY + camera.y - game.myPlayer.y, mouseX + camera.x - game.myPlayer.x);
     socket.emit('shoot', { angle });
 });
 
+function updateCrosshair(e) {
+    const crosshair = document.getElementById('crosshair');
+    if (game.status === 'playing') {
+        crosshair.style.display = 'block';
+        crosshair.style.left = e.clientX + 'px';
+        crosshair.style.top = e.clientY + 'px';
+    }
+}
+
+function updateHotbar() {
+    document.querySelectorAll('.hotbar-slot').forEach(el => {
+        el.classList.toggle('active', el.dataset.slot === selectedWeapon);
+    });
+}
+
 function updateBuildMenu() {
     document.querySelectorAll('.build-option').forEach(el => {
-        el.classList.remove('active');
-        if (el.dataset.type === selectedBuild) {
-            el.classList.add('active');
-        }
+        el.classList.toggle('active', el.dataset.type === selectedBuild);
     });
 }
 
@@ -267,75 +264,76 @@ function updateBuildMenu() {
 // =============================================
 
 function update() {
-    if (!gameState.playerId || !gameState.players[gameState.playerId]) return;
+    if (!game.id || !game.players[game.id] || game.status !== 'playing') return;
 
-    gameState.myPlayer = gameState.players[gameState.playerId];
+    game.myPlayer = game.players[game.id];
 
-    if (gameState.myPlayer.hp <= 0) {
+    if (game.myPlayer.hp <= 0) {
         document.getElementById('death-screen').style.display = 'flex';
+        document.getElementById('crosshair').style.display = 'none';
+        return;
     }
 
-    const player = gameState.myPlayer;
-    let dx = 0;
-    let dy = 0;
+    document.getElementById('death-screen').style.display = 'none';
+    document.getElementById('crosshair').style.display = 'block';
 
-    if (keys.w) dy -= player.speed;
-    if (keys.s) dy += player.speed;
-    if (keys.a) dx -= player.speed;
-    if (keys.d) dx += player.speed;
+    const p = game.myPlayer;
+    let dx = 0, dy = 0;
+
+    if (keys.w) dy -= p.speed;
+    if (keys.s) dy += p.speed;
+    if (keys.a) dx -= p.speed;
+    if (keys.d) dx += p.speed;
 
     if (dx !== 0 || dy !== 0) {
         const len = Math.sqrt(dx * dx + dy * dy);
-        dx = (dx / len) * player.speed;
-        dy = (dy / len) * player.speed;
+        dx = (dx / len) * p.speed;
+        dy = (dy / len) * p.speed;
 
-        player.x = Math.max(0, Math.min(gameState.mapWidth, player.x + dx));
-        player.y = Math.max(0, Math.min(gameState.mapHeight, player.y + dy));
+        p.x = Math.max(15, Math.min(game.mapWidth - 15, p.x + dx));
+        p.y = Math.max(15, Math.min(game.mapHeight - 15, p.y + dy));
 
-        player.angle = Math.atan2(dy, dx);
+        p.angle = Math.atan2(dy, dx);
 
-        socket.emit('move', {
-            x: player.x,
-            y: player.y,
-            angle: player.angle
-        });
+        socket.emit('move', { x: p.x, y: p.y, angle: p.angle });
     }
 
-    camera.x = player.x - canvas.width / 2;
-    camera.y = player.y - canvas.height / 2;
+    camera.x = p.x - canvas.width / 2;
+    camera.y = p.y - canvas.height / 2;
+    camera.x = Math.max(0, Math.min(game.mapWidth - canvas.width, camera.x));
+    camera.y = Math.max(0, Math.min(game.mapHeight - canvas.height, camera.y));
 
-    camera.x = Math.max(0, Math.min(gameState.mapWidth - canvas.width, camera.x));
-    camera.y = Math.max(0, Math.min(gameState.mapHeight - canvas.height, camera.y));
+    document.getElementById('hp-display').textContent = Math.floor(p.hp);
+    document.getElementById('hp-bar').style.width = (p.hp / p.maxHp * 100) + '%';
+    document.getElementById('money-display').textContent = p.money;
+    document.getElementById('ammo-display').textContent = p.ammo;
 
-    document.getElementById('hp-display').textContent = Math.floor(player.hp);
-    document.getElementById('money-display').textContent = player.money;
-
-    smoothPlayers[gameState.playerId] = {
-        x: player.x,
-        y: player.y,
-        angle: player.angle
-    };
+    smoothPlayers[p.id] = { x: p.x, y: p.y, angle: p.angle };
 }
 
 function getSmoothPos(entity, type) {
-    const smooth = type === 'player' ? smoothPlayers : (type === 'monster' ? smoothMonsters : smoothBuildings);
-    const prev = smooth[entity.id];
+    const smooth = type === 'player' ? smoothPlayers : smoothMonsters;
+    let s = smooth[entity.id];
 
-    if (!prev) {
-        smooth[entity.id] = { x: entity.x, y: entity.y, angle: entity.angle || 0 };
-        return { x: entity.x, y: entity.y, angle: entity.angle || 0 };
+    if (!s) {
+        s = { x: entity.x, y: entity.y, angle: entity.angle || 0 };
+        smooth[entity.id] = s;
+        return s;
     }
 
-    const lerp = 0.3;
-    prev.x += (entity.x - prev.x) * lerp;
-    prev.y += (entity.y - prev.y) * lerp;
-    prev.angle = entity.angle || prev.angle;
-
-    return prev;
+    const lerp = 0.35;
+    s.x += (entity.x - s.x) * lerp;
+    s.y += (entity.y - s.y) * lerp;
+    s.angle = entity.angle || s.angle;
+    return s;
 }
 
+// =============================================
+// RENDERING
+// =============================================
+
 function render() {
-    ctx.fillStyle = '#0f0f1a';
+    ctx.fillStyle = '#08080c';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
@@ -348,7 +346,7 @@ function render() {
     drawBullets();
     drawPlayers();
 
-    if (selectedBuild && gameState.myPlayer) {
+    if (selectedBuild && game.myPlayer) {
         drawBuildPreview();
     }
 
@@ -358,96 +356,99 @@ function render() {
 }
 
 function drawGrid() {
-    const gridSize = 100;
+    const size = 100;
 
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.lineWidth = 1;
 
-    const startX = Math.floor(camera.x / gridSize) * gridSize;
-    const startY = Math.floor(camera.y / gridSize) * gridSize;
-
-    for (let x = startX; x < camera.x + canvas.width + gridSize; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, camera.y);
-        ctx.lineTo(x, camera.y + canvas.height);
-        ctx.stroke();
+    for (let x = Math.floor(camera.x / size) * size; x < camera.x + canvas.width + size; x += size) {
+        ctx.beginPath(); ctx.moveTo(x, camera.y); ctx.lineTo(x, camera.y + canvas.height); ctx.stroke();
+    }
+    for (let y = Math.floor(camera.y / size) * size; y < camera.y + canvas.height + size; y += size) {
+        ctx.beginPath(); ctx.moveTo(camera.x, y); ctx.lineTo(camera.x + canvas.width, y); ctx.stroke();
     }
 
-    for (let y = startY; y < camera.y + canvas.height + gridSize; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(camera.x, y);
-        ctx.lineTo(camera.x + canvas.width, y);
-        ctx.stroke();
-    }
-
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, gameState.mapWidth, gameState.mapHeight);
+    ctx.strokeStyle = 'rgba(233, 69, 96, 0.3)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(0, 0, game.mapWidth, game.mapHeight);
 }
 
 function drawResourcePoints() {
-    gameState.resourcePoints.forEach(rp => {
-        if (rp.x < camera.x - rp.radius || rp.x > camera.x + canvas.width + rp.radius ||
-            rp.y < camera.y - rp.radius || rp.y > camera.y + canvas.height + rp.radius) return;
+    game.buildings.filter(b => b.type === 'spawner').forEach(rp => {
+        if (Math.abs(rp.x - camera.x) > 400 || Math.abs(rp.y - camera.y) > 400) return;
 
-        const gradient = ctx.createRadialGradient(rp.x, rp.y, 0, rp.x, rp.y, rp.radius);
-        gradient.addColorStop(0, 'rgba(0, 255, 100, 0.9)');
-        gradient.addColorStop(0.5, 'rgba(0, 255, 100, 0.3)');
-        gradient.addColorStop(1, 'rgba(0, 255, 100, 0)');
+        const gradient = ctx.createRadialGradient(rp.x, rp.y, 0, rp.x, rp.y, 50);
+        gradient.addColorStop(0, 'rgba(233, 69, 96, 0.4)');
+        gradient.addColorStop(1, 'rgba(233, 69, 96, 0)');
 
-        ctx.shadowColor = '#0f0';
-        ctx.shadowBlur = 20;
         ctx.fillStyle = gradient;
+        ctx.beginPath(); ctx.arc(rp.x, rp.y, 50, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = '#e94560';
+        ctx.beginPath(); ctx.arc(rp.x, rp.y, 15, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = '#ff6688';
+        ctx.font = 'bold 10px Orbitron';
+        ctx.textAlign = 'center';
+        ctx.fillText('SPAWN', rp.x, rp.y + 30);
+    });
+
+    game.buildings.filter(b => b.type === 'command_center').forEach(cc => {
+        ctx.shadowColor = '#4488ff';
+        ctx.shadowBlur = 30;
+
+        ctx.fillStyle = '#1a1a3e';
         ctx.beginPath();
-        ctx.arc(rp.x, rp.y, rp.radius, 0, Math.PI * 2);
+        ctx.arc(cc.x, cc.y, 50, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.strokeStyle = '#4488ff';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.fillStyle = '#4488ff';
+        ctx.beginPath();
+        ctx.arc(cc.x, cc.y, 25, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#88aaff';
+        ctx.beginPath();
+        ctx.arc(cc.x, cc.y, 12, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.shadowBlur = 0;
 
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 10px Arial';
+        ctx.font = 'bold 12px Orbitron';
         ctx.textAlign = 'center';
-        ctx.globalAlpha = 0.7;
-        ctx.fillText('RESOURCE', rp.x, rp.y + 4);
-        ctx.globalAlpha = 1;
+        ctx.fillText('COMMAND', cc.x, cc.y + 70);
     });
 }
 
 function drawBuildings() {
-    gameState.buildings.forEach(b => {
-        if (b.x < camera.x - 50 || b.x > camera.x + canvas.width + 50 ||
-            b.y < camera.y - 50 || b.y > camera.y + canvas.height + 50) return;
+    game.buildings.forEach(b => {
+        if (b.type === 'spawner' || b.type === 'command_center') return;
 
-        const colors = {
-            wall: '#888',
-            turret: '#4488ff',
-            dril: '#ff8844',
-            mine: '#44ff88'
-        };
+        const colors = { wall: '#666', turret: '#4488ff', dril: '#ff8844', mine: '#44ff88' };
         const color = colors[b.type];
 
         ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 15;
 
         switch (b.type) {
             case 'wall':
                 ctx.fillStyle = color;
                 ctx.fillRect(b.x - 20, b.y - 20, 40, 40);
-                ctx.strokeStyle = '#aaa';
+                ctx.strokeStyle = '#888';
                 ctx.lineWidth = 2;
                 ctx.strokeRect(b.x - 20, b.y - 20, 40, 40);
                 break;
-
             case 'turret':
                 ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, 15, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(b.x, b.y, 15, 0, Math.PI * 2); ctx.fill();
                 ctx.fillStyle = '#88aaff';
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, 8, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill();
                 break;
-
             case 'dril':
                 ctx.fillStyle = color;
                 ctx.beginPath();
@@ -457,12 +458,9 @@ function drawBuildings() {
                 ctx.closePath();
                 ctx.fill();
                 break;
-
             case 'mine':
                 ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, 12, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(b.x, b.y, 12, 0, Math.PI * 2); ctx.fill();
                 ctx.strokeStyle = '#88ffaa';
                 ctx.lineWidth = 2;
                 ctx.stroke();
@@ -471,220 +469,150 @@ function drawBuildings() {
 
         ctx.shadowBlur = 0;
 
-        const hpPercent = b.hp / b.maxHp;
-        if (hpPercent < 1) {
-            ctx.fillStyle = '#333';
-            ctx.fillRect(b.x - 15, b.y - 30, 30, 5);
-            ctx.fillStyle = hpPercent > 0.5 ? '#4f4' : (hpPercent > 0.25 ? '#ff4' : '#f44');
-            ctx.fillRect(b.x - 15, b.y - 30, 30 * hpPercent, 5);
+        const hp = b.hp / b.maxHp;
+        if (hp < 1) {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(b.x - 15, b.y - 28, 30, 4);
+            ctx.fillStyle = hp > 0.5 ? '#4f4' : hp > 0.25 ? '#ff4' : '#f44';
+            ctx.fillRect(b.x - 15, b.y - 28, 30 * hp, 4);
         }
     });
 }
 
 function drawMonsters() {
-    gameState.monsters.forEach(m => {
-        const smooth = getSmoothPos(m, 'monster');
+    game.monsters.forEach(m => {
+        const s = getSmoothPos(m, 'monster');
 
-        if (smooth.x < camera.x - 30 || smooth.x > camera.x + canvas.width + 30 ||
-            smooth.y < camera.y - 30 || smooth.y > camera.y + canvas.height + 30) return;
+        ctx.shadowColor = m.type === 'strong' ? '#ff0000' : '#e94560';
+        ctx.shadowBlur = 15;
 
-        if (m.type === 'basic') {
-            ctx.shadowColor = '#e94560';
-            ctx.shadowBlur = 10;
-            ctx.fillStyle = '#e94560';
-            ctx.beginPath();
-            ctx.arc(smooth.x, smooth.y, 12, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.shadowBlur = 0;
+        ctx.fillStyle = m.type === 'strong' ? '#cc0000' : '#e94560';
+        ctx.beginPath(); ctx.arc(s.x, s.y, m.type === 'strong' ? 18 : 12, 0, Math.PI * 2); ctx.fill();
 
-            ctx.fillStyle = '#ff6688';
-            ctx.beginPath();
-            ctx.arc(smooth.x - 4, smooth.y - 4, 3, 0, Math.PI * 2);
-            ctx.arc(smooth.x + 4, smooth.y - 4, 3, 0, Math.PI * 2);
-            ctx.fill();
-        } else if (m.type === 'strong') {
-            ctx.shadowColor = '#ff0000';
-            ctx.shadowBlur = 15;
-            ctx.fillStyle = '#ff0000';
-            ctx.beginPath();
-            ctx.arc(smooth.x, smooth.y, 18, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ff6688';
+        ctx.beginPath(); ctx.arc(s.x - 4, s.y - 4, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s.x + 4, s.y - 4, 3, 0, Math.PI * 2); ctx.fill();
 
-            ctx.fillStyle = '#ff4444';
-            ctx.beginPath();
-            ctx.arc(smooth.x - 5, smooth.y - 5, 5, 0, Math.PI * 2);
-            ctx.arc(smooth.x + 5, smooth.y - 5, 5, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        ctx.shadowBlur = 0;
 
-        const hpPercent = m.hp / m.maxHp;
-        if (hpPercent < 1) {
-            ctx.fillStyle = '#333';
-            ctx.fillRect(smooth.x - 15, smooth.y - 25, 30, 4);
+        const hp = m.hp / m.maxHp;
+        if (hp < 1) {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(s.x - 12, s.y - 22, 24, 3);
             ctx.fillStyle = '#f44';
-            ctx.fillRect(smooth.x - 15, smooth.y - 25, 30 * hpPercent, 4);
+            ctx.fillRect(s.x - 12, s.y - 22, 24 * hp, 3);
         }
     });
 }
 
 function drawBullets() {
-    gameState.bullets.forEach(b => {
-        if (b.x < camera.x - 20 || b.x > camera.x + canvas.width + 20 ||
-            b.y < camera.y - 20 || b.y > camera.y + canvas.height + 20) return;
-
-        const color = b.isTurret ? '#88f' : '#ff0';
+    game.bullets.forEach(b => {
+        const color = b.type === 'laser' ? '#4488ff' : b.type === 'turret' ? '#88f' : '#ff0';
 
         ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 12;
         ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.type === 'laser' ? 8 : 5, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
 
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.5;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(b.x, b.y);
-        ctx.lineTo(b.x - Math.cos(b.angle) * 15, b.y - Math.sin(b.angle) * 15);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+        if (b.type === 'laser') {
+            ctx.strokeStyle = color;
+            ctx.globalAlpha = 0.5;
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - Math.cos(b.angle) * 40, b.y - Math.sin(b.angle) * 40); ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
     });
 }
 
 function drawPlayers() {
-    Object.values(gameState.players).forEach(p => {
-        const smooth = getSmoothPos(p, 'player');
+    Object.values(game.players).forEach(p => {
+        const s = getSmoothPos(p, 'player');
 
-        if (smooth.x < camera.x - 25 || smooth.x > camera.x + canvas.width + 25 ||
-            smooth.y < camera.y - 25 || smooth.y > camera.y + canvas.height + 25) return;
+        if (Math.abs(s.x - camera.x) > 400 || Math.abs(s.y - camera.y) > 400) return;
 
-        const isMe = p.id === gameState.playerId;
+        const isMe = p.id === game.id;
         const color = isMe ? '#00ff88' : '#4488ff';
 
         ctx.shadowColor = color;
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 20;
         ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(smooth.x, smooth.y, 15, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(s.x, s.y, 15, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
 
-        if (smooth.angle) {
+        if (s.angle) {
             ctx.strokeStyle = color;
             ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(smooth.x, smooth.y);
-            ctx.lineTo(
-                smooth.x + Math.cos(smooth.angle) * 20,
-                smooth.y + Math.sin(smooth.angle) * 20
-            );
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x + Math.cos(s.angle) * 22, s.y + Math.sin(s.angle) * 22); ctx.stroke();
         }
 
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 14px Arial';
+        ctx.font = 'bold 12px Orbitron';
         ctx.textAlign = 'center';
-        ctx.fillText(p.nickname, smooth.x, smooth.y - 25);
+        ctx.fillText(p.nickname, s.x, s.y - 25);
 
-        const hpPercent = p.hp / p.maxHp;
-        ctx.fillStyle = '#333';
-        ctx.fillRect(smooth.x - 20, smooth.y - 18, 40, 6);
-        ctx.fillStyle = hpPercent > 0.5 ? '#4f4' : (hpPercent > 0.25 ? '#ff4' : '#f44');
-        ctx.fillRect(smooth.x - 20, smooth.y - 18, 40 * hpPercent, 6);
+        const hp = p.hp / p.maxHp;
+        ctx.fillStyle = '#222';
+        ctx.fillRect(s.x - 15, s.y - 16, 30, 4);
+        ctx.fillStyle = hp > 0.5 ? '#4f4' : '#f44';
+        ctx.fillRect(s.x - 15, s.y - 16, 30 * hp, 4);
     });
 }
 
 function drawBuildPreview() {
-    const worldX = mouseX + camera.x;
-    const worldY = mouseY + camera.y;
-
-    const costs = {
-        wall: 50,
-        turret: 100,
-        dril: 150,
-        mine: 75
-    };
+    const wx = mouseX + camera.x;
+    const wy = mouseY + camera.y;
+    const costs = { wall: 50, turret: 100, dril: 150, mine: 75 };
     const cost = costs[selectedBuild];
 
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = selectedBuild === 'wall' ? '#666' : selectedBuild === 'turret' ? '#4488ff' : selectedBuild === 'dril' ? '#ff8844' : '#44ff88';
 
-    switch (selectedBuild) {
-        case 'wall':
-            ctx.fillStyle = '#888';
-            ctx.fillRect(worldX - 20, worldY - 20, 40, 40);
-            break;
-        case 'turret':
-            ctx.fillStyle = '#4488ff';
-            ctx.beginPath();
-            ctx.arc(worldX, worldY, 15, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-        case 'dril':
-            ctx.fillStyle = '#ff8844';
-            ctx.beginPath();
-            ctx.arc(worldX, worldY, 20, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-        case 'mine':
-            ctx.fillStyle = '#44ff88';
-            ctx.beginPath();
-            ctx.arc(worldX, worldY, 12, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-    }
+    if (selectedBuild === 'wall') ctx.fillRect(wx - 20, wy - 20, 40, 40);
+    else { ctx.beginPath(); ctx.arc(wx, wy, 15, 0, Math.PI * 2); ctx.fill(); }
 
     ctx.globalAlpha = 1;
-
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px Arial';
+    ctx.font = 'bold 14px Orbitron';
     ctx.textAlign = 'center';
-    ctx.fillText(`$${cost}`, worldX, worldY + 35);
+    ctx.fillText(`$${cost}`, wx, wy + 35);
 }
 
 function renderMinimap() {
-    const mmW = 150;
-    const mmH = 150;
+    const w = 180, h = 180;
+    minimapCanvas.width = w;
+    minimapCanvas.height = h;
 
-    minimap.width = mmW;
-    minimap.height = mmH;
+    mmCtx.fillStyle = 'rgba(10, 10, 20, 0.9)';
+    mmCtx.fillRect(0, 0, w, h);
 
-    minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    minimapCtx.fillRect(0, 0, mmW, mmH);
+    const sx = w / game.mapWidth;
+    const sy = h / game.mapHeight;
 
-    const scaleX = mmW / gameState.mapWidth;
-    const scaleY = mmH / gameState.mapHeight;
-
-    minimapCtx.fillStyle = 'rgba(0, 255, 100, 0.3)';
-    gameState.resourcePoints.forEach(rp => {
-        minimapCtx.beginPath();
-        minimapCtx.arc(rp.x * scaleX, rp.y * scaleY, 3, 0, Math.PI * 2);
-        minimapCtx.fill();
+    game.buildings.filter(b => b.type === 'spawner').forEach(b => {
+        mmCtx.fillStyle = 'rgba(233, 69, 96, 0.5)';
+        mmCtx.fillRect(b.x * sx - 2, b.y * sy - 2, 4, 4);
     });
 
-    minimapCtx.fillStyle = 'rgba(233, 69, 96, 0.5)';
-    gameState.monsters.forEach(m => {
-        minimapCtx.fillRect(m.x * scaleX - 1, m.y * scaleY - 1, 2, 2);
+    game.buildings.filter(b => b.type === 'command_center').forEach(b => {
+        mmCtx.fillStyle = '#4488ff';
+        mmCtx.fillRect(b.x * sx - 4, b.y * sy - 4, 8, 8);
     });
 
-    minimapCtx.fillStyle = '#4488ff';
-    Object.values(gameState.players).forEach(p => {
-        minimapCtx.beginPath();
-        minimapCtx.arc(p.x * scaleX, p.y * scaleY, 3, 0, Math.PI * 2);
-        minimapCtx.fill();
+    mmCtx.fillStyle = 'rgba(233, 69, 96, 0.6)';
+    game.monsters.forEach(m => {
+        mmCtx.fillRect(m.x * sx - 1, m.y * sy - 1, 2, 2);
     });
 
-    if (gameState.myPlayer) {
-        minimapCtx.strokeStyle = '#fff';
-        minimapCtx.lineWidth = 2;
-        minimapCtx.strokeRect(
-            camera.x * scaleX,
-            camera.y * scaleY,
-            canvas.width * scaleX,
-            canvas.height * scaleY
-        );
+    mmCtx.fillStyle = '#00ff88';
+    Object.values(game.players).forEach(p => {
+        mmCtx.beginPath(); mmCtx.arc(p.x * sx, p.y * sy, 3, 0, Math.PI * 2); mmCtx.fill();
+    });
+
+    if (game.myPlayer) {
+        mmCtx.strokeStyle = '#fff';
+        mmCtx.lineWidth = 2;
+        mmCtx.strokeRect(camera.x * sx, camera.y * sy, canvas.width * sx, canvas.height * sy);
     }
 }
 
