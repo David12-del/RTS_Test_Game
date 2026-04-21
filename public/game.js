@@ -145,8 +145,31 @@ socket.on('resourceGenerated', (data) => {
 });
 
 socket.on('error', (msg) => {
-    alert(msg);
+    showNotification(msg, '#ff4444');
 });
+
+socket.on('buildError', (msg) => {
+    showNotification(msg, '#ff8844');
+});
+
+function showNotification(msg, color = '#fff') {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        bottom: 100px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 18px;
+        color: ${color};
+        font-weight: bold;
+        z-index: 200;
+        animation: fadeOut 2s forwards;
+    `;
+    notification.textContent = msg;
+    document.body.appendChild(notification);
+
+    setTimeout(() => notification.remove(), 2000);
+}
 
 function showWaveNotification(wave) {
     const notification = document.createElement('div');

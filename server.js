@@ -13,6 +13,15 @@ const MAP_WIDTH = 2000;
 const MAP_HEIGHT = 2000;
 const RESOURCE_COUNT = 15;
 
+const PLAYER_RADIUS = 15;
+const BUILD_HITBOXES = {
+    wall: { w: 40, h: 40 },
+    turret: { w: 30, h: 30 },
+    dril: { w: 40, h: 40 },
+    mine: { w: 24, h: 24 },
+    spawner: { w: 40, h: 40 }
+};
+
 const players = {};
 const buildings = {};
 const monsters = [];
@@ -77,7 +86,9 @@ io.on('connection', (socket) => {
             id: socket.id,
             mapWidth: MAP_WIDTH,
             mapHeight: MAP_HEIGHT,
-            resourcePoints
+            resourcePoints,
+            buildingHitboxes: BUILD_HITBOXES,
+            playerRadius: PLAYER_RADIUS
         });
 
         io.emit('playerJoined', players[socket.id]);
@@ -85,12 +96,41 @@ io.on('connection', (socket) => {
 
     socket.on('move', (data) => {
         const player = players[socket.id];
-        if (player) {
-            player.x = Math.max(0, Math.min(MAP_WIDTH, data.x));
-            player.y = Math.max(0, Math.min(MAP_HEIGHT, data.y));
-            player.angle = data.angle || 0;
+        if (!player || player.hp <= 0) return;
+
+        let newX = Math.max(PLAYER_RADIUS, Math.min(MAP_WIDTH - PLAYER_RADIUS, data.x));
+        let newY = Math.max(PLAYER_RADIUS, Math.min(MAP_HEIGHT - PLAYER_RADIUS, data.y));
+
+        const testX = { x: newX, y: player.y };
+        const testY = { x: player.x, y: newY };
+
+        if (!checkCollision(testX)) {
+            player.x = newX;
         }
+        if (!checkCollision(testY)) {
+            player.y = newY;
+        }
+
+        player.angle = data.angle || 0;
     });
+
+    function checkCollision(obj, extraRadius = 0) {
+        const r = PLAYER_RADIUS + extraRadius;
+
+        for (const b of Object.values(buildings)) {
+            const bh = BUILD_HITBOXES[b.type];
+            if (!bh) continue;
+
+            const halfW = bh.w / 2 + r;
+            const halfH = bh.h / 2 + r;
+
+            if (Math.abs(obj.x - b.x) < halfW && Math.abs(obj.y - b.y) < halfH) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     socket.on('shoot', (data) => {
         const player = players[socket.id];
@@ -129,6 +169,47 @@ io.on('connection', (socket) => {
         const cost = costs[data.type];
         if (!cost || player.money < cost) return;
 
+        const bh = BUILD_HITBOXES[data.type];
+        if (!bh) return;
+
+        const buildObj = { x: data.x, y: data.y };
+        const buildRadius = Math.max(bh.w, bh.h) / 2;
+
+        for (const existing of Object.values(buildings)) {
+            const eh = BUILD_HITBOXES[existing.type];
+            if (!eh) continue;
+
+            const dx = Math.abs(buildObj.x - existing.x);
+            const dy = Math.abs(buildObj.y - existing.y);
+            const minDist = (bh.w / 2 + eh.w / 2) * 0.9;
+
+            if (dx < minDist && dy < minDist) {
+                socket.emit('buildError', 'Too close to another building!');
+                return;
+            }
+        }
+
+        if (data.type === 'dril') {
+            const nearResource = resourcePoints.find(rp => {
+                const dx = rp.x - data.x;
+                const dy = rp.y - data.y;
+                return Math.sqrt(dx * dx + dy * dy) < rp.radius + 30;
+            });
+            if (!nearResource) {
+                socket.emit('buildError', 'Dril can only be placed on resource points!');
+                return;
+            }
+        }
+
+        const distToPlayer = Math.sqrt(
+            Math.pow(data.x - player.x, 2) +
+            Math.pow(data.y - player.y, 2)
+        );
+        if (distToPlayer < PLAYER_RADIUS + buildRadius + 20) {
+            socket.emit('buildError', 'Too close to player!');
+            return;
+        }
+
         player.money -= cost;
 
         const building = {
@@ -141,19 +222,6 @@ io.on('connection', (socket) => {
             ownerId: socket.id,
             shootCooldown: 0
         };
-
-        if (data.type === 'dril') {
-            const nearResource = resourcePoints.find(rp => {
-                const dx = rp.x - data.x;
-                const dy = rp.y - data.y;
-                return Math.sqrt(dx * dx + dy * dy) < rp.radius + 30;
-            });
-            if (!nearResource) {
-                player.money += cost;
-                socket.emit('error', 'Dril can only be placed on resource points!');
-                return;
-            }
-        }
 
         buildings[building.id] = building;
         io.emit('buildingCreated', building);
@@ -327,10 +395,33 @@ setInterval(() => {
 
         if (target) {
             const angle = Math.atan2(target.y - monster.y, target.x - monster.x);
+            const attackDist = target.hp !== undefined ? 25 : 35;
 
-            if (minDist > 30) {
-                monster.x += Math.cos(angle) * monster.speed;
-                monster.y += Math.sin(angle) * monster.speed;
+            if (minDist > attackDist) {
+                let newX = monster.x + Math.cos(angle) * monster.speed;
+                let newY = monster.y + Math.sin(angle) * monster.speed;
+
+                let blocked = false;
+                for (const b of Object.values(buildings)) {
+                    if (b.type === 'wall') {
+                        const bh = BUILD_HITBOXES.wall;
+                        if (Math.abs(newX - b.x) < bh.w / 2 + 12 &&
+                            Math.abs(newY - b.y) < bh.h / 2 + 12) {
+                            blocked = true;
+                            b.hp -= 2;
+                            if (b.hp <= 0) {
+                                delete buildings[b.id];
+                                io.emit('buildingRemoved', b.id);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (!blocked) {
+                    monster.x = newX;
+                    monster.y = newY;
+                }
             } else if (monster.attackCooldown <= 0) {
                 monster.attackCooldown = 60;
                 if (target.hp !== undefined) {
