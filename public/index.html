@@ -5,30 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Survival Arena</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&display=swap');
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: 'Rajdhani', sans-serif;
-            background: #0a0a0f;
+            background: #08080c;
             color: #eee;
             overflow: hidden;
             user-select: none;
         }
 
-        /* ============ LOBBY SCREEN ============ */
+        /* ============ LOBBY ============ */
         #lobby-screen {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%);
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: linear-gradient(135deg, #0a0a12 0%, #12121f 50%, #0a0a12 100%);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -36,381 +30,215 @@
             z-index: 100;
         }
 
-        .lobby-bg {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background:
-                radial-gradient(circle at 20% 80%, rgba(233, 69, 96, 0.1) 0%, transparent 40%),
-                radial-gradient(circle at 80% 20%, rgba(68, 136, 255, 0.1) 0%, transparent 40%);
-            pointer-events: none;
-        }
-
         #lobby-screen h1 {
             font-family: 'Orbitron', sans-serif;
-            font-size: 64px;
+            font-size: 52px;
             font-weight: 900;
-            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 50%, #4488ff 100%);
+            background: linear-gradient(135deg, #e94560, #ff6b6b, #4488ff);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            background-clip: text;
-            text-shadow: 0 0 60px rgba(233, 69, 96, 0.5);
-            margin-bottom: 10px;
-            letter-spacing: 4px;
+            margin-bottom: 5px;
         }
 
-        .lobby-subtitle {
-            color: #666;
-            font-size: 18px;
-            margin-bottom: 40px;
-            letter-spacing: 2px;
-        }
+        .subtitle { color: #555; letter-spacing: 4px; font-size: 14px; margin-bottom: 35px; }
 
         .lobby-box {
-            background: rgba(20, 20, 30, 0.9);
+            background: rgba(15, 15, 25, 0.95);
             border: 1px solid rgba(233, 69, 96, 0.3);
-            border-radius: 16px;
-            padding: 30px 50px;
+            border-radius: 14px;
+            padding: 28px 35px;
             text-align: center;
-            backdrop-filter: blur(10px);
+            min-width: 340px;
         }
 
-        #lobby-screen input {
-            width: 280px;
-            padding: 15px 25px;
-            font-size: 18px;
+        .lobby-box input {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 15px;
             font-family: 'Rajdhani', sans-serif;
-            border: 2px solid rgba(233, 69, 96, 0.5);
-            border-radius: 8px;
-            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(233, 69, 96, 0.4);
+            border-radius: 7px;
+            background: rgba(0, 0, 0, 0.6);
             color: #fff;
-            margin-bottom: 20px;
-            transition: all 0.3s;
+            margin-bottom: 12px;
         }
 
-        #lobby-screen input:focus {
-            outline: none;
-            border-color: #e94560;
-            box-shadow: 0 0 20px rgba(233, 69, 96, 0.3);
-        }
+        .lobby-box input:focus { outline: none; border-color: #e94560; }
 
-        #lobby-screen button {
-            width: 280px;
-            padding: 15px 30px;
-            font-size: 20px;
+        .lobby-buttons { display: flex; gap: 10px; margin-bottom: 12px; }
+
+        .lobby-box button {
+            flex: 1;
+            padding: 12px 18px;
             font-family: 'Orbitron', sans-serif;
             font-weight: 700;
+            font-size: 14px;
             border: none;
-            border-radius: 8px;
-            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+            border-radius: 7px;
             color: #fff;
             cursor: pointer;
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 2px;
+            transition: 0.2s;
         }
 
-        #lobby-screen button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(233, 69, 96, 0.4);
+        .btn-create { background: linear-gradient(135deg, #e94560, #ff6b6b); }
+        .btn-join { background: linear-gradient(135deg, #4488ff, #66aaff); }
+        .btn-start { width: 100%; background: linear-gradient(135deg, #00aa55, #00cc66); display: none; }
+        .btn-start.visible { display: block; }
+
+        .lobby-box button:hover { transform: translateY(-2px); }
+
+        .code-row { display: flex; gap: 10px; margin-bottom: 12px; }
+        .code-row input { width: 100px !important; text-align: center; letter-spacing: 6px; font-size: 18px !important; }
+
+        .players-list { margin-top: 18px; text-align: left; }
+        .players-list h3 { color: #e94560; font-size: 11px; letter-spacing: 2px; margin-bottom: 8px; }
+
+        .player-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 7px 10px;
+            background: rgba(30, 30, 50, 0.5);
+            border-radius: 5px;
+            margin-bottom: 5px;
         }
 
-        #lobby-screen button:disabled {
-            background: #333;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
+        .player-dot { width: 24px; height: 24px; border-radius: 50%; background: #4488ff; }
+        .player-name { flex: 1; font-weight: 600; }
+        .host-badge { font-size: 9px; color: #e94560; background: rgba(233,69,96,0.2); padding: 3px 6px; border-radius: 3px; }
 
-        .lobby-info {
-            margin-top: 30px;
-            color: #888;
-            font-size: 14px;
-        }
+        .lobby-status { margin-top: 12px; font-size: 13px; }
+        .lobby-status.waiting { color: #ffcc00; }
+        .lobby-status.playing { color: #00ff66; }
 
-        .lobby-status {
-            margin-top: 15px;
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-size: 16px;
-        }
+        .hint { color: #444; font-size: 11px; margin-top: 22px; }
 
-        .lobby-status.waiting {
-            background: rgba(255, 200, 0, 0.2);
-            color: #ffc800;
-            border: 1px solid rgba(255, 200, 0, 0.3);
-        }
+        /* ============ GAME ============ */
+        #game-container { display: none; width: 100vw; height: 100vh; }
+        #gameCanvas { display: block; background: #08080c; }
 
-        .lobby-status.playing {
-            background: rgba(0, 255, 100, 0.2);
-            color: #00ff64;
-            border: 1px solid rgba(0, 255, 100, 0.3);
-        }
-
-        /* ============ GAME CONTAINER ============ */
-        #game-container {
-            display: none;
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-        }
-
-        #gameCanvas {
-            display: block;
-            background: #08080c;
-        }
-
-        /* ============ UI OVERLAY ============ */
-        #ui-overlay {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            pointer-events: none;
-        }
+        #ui-overlay { position: absolute; top: 12px; left: 12px; pointer-events: none; }
 
         .ui-panel {
-            background: rgba(10, 10, 20, 0.85);
+            background: rgba(10, 10, 18, 0.9);
             border: 1px solid rgba(233, 69, 96, 0.4);
-            border-radius: 12px;
-            padding: 15px 20px;
-            margin-bottom: 10px;
-            backdrop-filter: blur(5px);
-            min-width: 150px;
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin-bottom: 6px;
+            backdrop-filter: blur(4px);
         }
 
-        .ui-panel h3 {
-            color: #e94560;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 2px;
-            margin-bottom: 5px;
-            font-family: 'Orbitron', sans-serif;
-        }
+        .ui-panel h3 { color: #e94560; font-size: 9px; letter-spacing: 2px; margin-bottom: 3px; }
+        .ui-panel .value { font-size: 22px; font-weight: 700; font-family: 'Orbitron', sans-serif; }
 
-        .ui-panel .value {
-            font-size: 28px;
-            font-weight: 700;
-            font-family: 'Orbitron', sans-serif;
-        }
+        .hp-bar { margin-top: 5px; height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
+        .hp-bar-fill { height: 100%; background: linear-gradient(90deg, #e94560, #ff6b6b); transition: width 0.3s; }
 
-        .ui-panel .bar {
-            margin-top: 8px;
-            height: 6px;
-            background: #1a1a2e;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .ui-panel .bar-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #e94560, #ff6b6b);
-            transition: width 0.3s;
-        }
-
-        /* ============ WAVE TIMER ============ */
         #wave-timer {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(10, 10, 20, 0.9);
+            position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+            background: rgba(10, 10, 18, 0.9);
             border: 1px solid rgba(233, 69, 96, 0.5);
-            border-radius: 12px;
-            padding: 12px 30px;
+            border-radius: 8px;
+            padding: 8px 20px;
             text-align: center;
-            backdrop-filter: blur(5px);
         }
 
-        #wave-timer .wave-label {
-            color: #e94560;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 2px;
-            font-family: 'Orbitron', sans-serif;
+        #wave-timer .wave-label { color: #e94560; font-size: 10px; letter-spacing: 2px; }
+        #wave-timer .timer { color: #fff; font-size: 24px; font-weight: 900; font-family: 'Orbitron', sans-serif; }
+
+        #minimap {
+            position: absolute; top: 12px; right: 12px;
+            width: 140px; height: 140px;
+            background: rgba(10, 10, 18, 0.9);
+            border: 2px solid #e94560;
+            border-radius: 6px;
         }
 
-        #wave-timer .timer {
-            color: #fff;
-            font-size: 32px;
-            font-weight: 900;
-            font-family: 'Orbitron', sans-serif;
+        #crosshair {
+            position: fixed; pointer-events: none; z-index: 10; display: none;
         }
+        #crosshair::before, #crosshair::after {
+            content: ''; position: absolute; background: rgba(255,255,255,0.8);
+        }
+        #crosshair::before { width: 14px; height: 2px; left: -7px; top: -1px; }
+        #crosshair::after { width: 2px; height: 14px; left: -1px; top: -7px; }
 
         /* ============ HOTBAR ============ */
         #hotbar {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 8px;
-            background: rgba(10, 10, 20, 0.9);
+            position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 5px;
+            background: rgba(10, 10, 18, 0.9);
             border: 1px solid rgba(233, 69, 96, 0.4);
-            border-radius: 12px;
-            padding: 10px 15px;
-            backdrop-filter: blur(5px);
+            border-radius: 8px;
+            padding: 6px 10px;
         }
 
         .hotbar-slot {
-            width: 60px;
-            height: 60px;
+            width: 44px; height: 44px;
             background: rgba(30, 30, 50, 0.8);
             border: 2px solid #333;
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            border-radius: 6px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
             cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
+            transition: 0.2s;
         }
 
-        .hotbar-slot:hover {
-            border-color: #666;
-        }
-
-        .hotbar-slot.active {
-            border-color: #e94560;
-            background: rgba(233, 69, 96, 0.2);
-            box-shadow: 0 0 15px rgba(233, 69, 96, 0.4);
-        }
-
-        .hotbar-slot .key {
-            position: absolute;
-            top: 4px;
-            left: 6px;
-            font-size: 11px;
-            color: #666;
-            font-weight: 700;
-        }
-
-        .hotbar-slot .icon {
-            font-size: 24px;
-        }
-
-        .hotbar-slot .name {
-            font-size: 10px;
-            color: #888;
-            margin-top: 2px;
-        }
-
-        .hotbar-slot .ammo {
-            position: absolute;
-            bottom: 4px;
-            right: 6px;
-            font-size: 10px;
-            color: #ff6b6b;
-            font-weight: 700;
-        }
+        .hotbar-slot.active { border-color: #e94560; background: rgba(233, 69, 96, 0.2); }
+        .hotbar-slot .icon { font-size: 18px; }
 
         /* ============ BUILD MENU ============ */
         #build-menu {
-            position: absolute;
-            bottom: 100px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: none;
-            gap: 10px;
-            background: rgba(10, 10, 20, 0.95);
+            position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+            display: none; gap: 8px;
+            background: rgba(10, 10, 18, 0.95);
             border: 1px solid rgba(68, 136, 255, 0.5);
-            border-radius: 12px;
-            padding: 15px;
-            backdrop-filter: blur(5px);
+            border-radius: 10px;
+            padding: 12px;
         }
 
-        #build-menu.visible {
-            display: flex;
-        }
+        #build-menu.visible { display: flex; }
 
         .build-option {
             text-align: center;
-            padding: 12px 18px;
-            border-radius: 8px;
+            padding: 10px 14px;
+            border-radius: 6px;
             background: rgba(30, 30, 50, 0.8);
             border: 2px solid #333;
-            transition: all 0.2s;
-            min-width: 80px;
+            transition: 0.2s;
+            min-width: 70px;
         }
 
-        .build-option:hover {
-            border-color: #4488ff;
-            background: rgba(68, 136, 255, 0.15);
-        }
+        .build-option:hover { border-color: #4488ff; background: rgba(68, 136, 255, 0.15); }
+        .build-option.active { border-color: #4488ff; background: rgba(68, 136, 255, 0.3); }
 
-        .build-option.active {
-            border-color: #4488ff;
-            background: rgba(68, 136, 255, 0.3);
-            box-shadow: 0 0 20px rgba(68, 136, 255, 0.4);
-        }
+        .build-option .key { font-size: 12px; color: #4488ff; font-weight: bold; }
+        .build-option .name { font-size: 12px; color: #fff; margin: 3px 0; }
+        .build-option .cost { font-size: 10px; color: #00ff64; }
 
-        .build-option .key {
-            font-size: 14px;
-            font-weight: bold;
-            color: #4488ff;
-            margin-bottom: 4px;
-        }
-
-        .build-option .name {
-            font-size: 13px;
-            color: #fff;
-        }
-
-        .build-option .cost {
-            font-size: 11px;
-            color: #00ff64;
-            margin-top: 4px;
-        }
-
-        /* ============ MINIMAP ============ */
-        #minimap {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 180px;
-            height: 180px;
-            background: rgba(10, 10, 20, 0.9);
-            border: 2px solid #e94560;
-            border-radius: 8px;
-        }
-
-        /* ============ DEATH SCREEN ============ */
+        /* ============ DEATH ============ */
         #death-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.9);
             display: none;
             flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            justify-content: center; align-items: center;
             z-index: 50;
         }
 
         #death-screen h1 {
             font-family: 'Orbitron', sans-serif;
-            font-size: 64px;
+            font-size: 48px;
             color: #e94560;
-            text-shadow: 0 0 40px rgba(233, 69, 96, 0.8);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
+            text-shadow: 0 0 30px rgba(233, 69, 96, 0.8);
         }
 
         #death-screen button {
-            margin-top: 30px;
-            padding: 15px 50px;
-            font-size: 20px;
+            margin-top: 25px;
+            padding: 12px 35px;
             font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
             border: none;
-            border-radius: 8px;
+            border-radius: 7px;
             background: #e94560;
             color: #fff;
             cursor: pointer;
@@ -418,122 +246,78 @@
 
         /* ============ NOTIFICATIONS ============ */
         .notification {
-            position: fixed;
-            bottom: 150px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 30px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 700;
+            position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+            padding: 8px 20px;
+            border-radius: 5px;
+            font-size: 13px; font-weight: 700;
             z-index: 200;
             animation: fadeOut 2s forwards;
         }
 
-        .notification.error {
-            background: rgba(255, 68, 68, 0.9);
-            border: 1px solid #ff4444;
-        }
+        .notification.error { background: rgba(255, 50, 50, 0.9); }
+        .notification.info { background: rgba(68, 136, 255, 0.9); }
 
-        .notification.success {
-            background: rgba(0, 255, 100, 0.9);
-            border: 1px solid #00ff64;
-        }
-
-        .notification.info {
-            background: rgba(68, 136, 255, 0.9);
-            border: 1px solid #4488ff;
-        }
-
-        @keyframes fadeOut {
-            0% { opacity: 1; transform: translateX(-50%) translateY(0); }
-            70% { opacity: 1; }
-            100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
-        }
-
-        /* ============ CROSSHAIR ============ */
-        #crosshair {
-            position: fixed;
-            pointer-events: none;
-            z-index: 10;
-            display: none;
-        }
-
-        #crosshair::before,
-        #crosshair::after {
-            content: '';
-            position: absolute;
-            background: rgba(255, 255, 255, 0.8);
-        }
-
-        #crosshair::before {
-            width: 20px;
-            height: 2px;
-            left: -10px;
-            top: -1px;
-        }
-
-        #crosshair::after {
-            width: 2px;
-            height: 20px;
-            left: -1px;
-            top: -10px;
-        }
+        @keyframes fadeOut { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
     </style>
 </head>
 <body>
-    <!-- LOBBY SCREEN -->
+    <!-- LOBBY -->
     <div id="lobby-screen">
-        <div class="lobby-bg"></div>
         <h1>SURVIVAL</h1>
-        <div class="lobby-subtitle">ARENA</div>
+        <div class="subtitle">ARENA</div>
 
         <div class="lobby-box">
-            <input type="text" id="nickname-input" placeholder="Enter nickname" maxlength="15">
-            <button id="create-btn">CREATE GAME</button>
-            <button id="join-btn" style="margin-top: 10px; background: #333;">JOIN GAME</button>
+            <input type="text" id="nickname" placeholder="Nickname" maxlength="15">
 
-            <div class="lobby-status waiting" id="lobby-status" style="display: none;">
-                Waiting for players...
+            <div class="lobby-buttons">
+                <button class="btn-create" id="create-btn">CREATE</button>
+                <button class="btn-join" id="join-btn">JOIN</button>
             </div>
-        </div>
 
-        <div class="lobby-info">
-            WASD - Move | Click - Shoot/Build | 1-4 - Select Building | Q/E - Weapon
+            <div class="code-row" id="code-row" style="display:none">
+                <input type="text" id="room-code" placeholder="0000" maxlength="4">
+            </div>
+
+            <button class="btn-start btn-create" id="start-btn">START GAME</button>
+
+            <div class="players-list" id="players-list" style="display:none">
+                <h3>PLAYERS</h3>
+                <div id="players-container"></div>
+            </div>
+
+            <div class="lobby-status" id="lobby-status"></div>
+
+            <div class="hint">WASD - Move | Click - Shoot | B - Build Menu</div>
         </div>
     </div>
 
     <!-- GAME -->
     <div id="game-container">
         <canvas id="gameCanvas"></canvas>
-
         <div id="crosshair"></div>
 
         <div id="ui-overlay">
             <div class="ui-panel">
                 <h3>HEALTH</h3>
                 <div class="value" id="hp-display">100</div>
-                <div class="bar"><div class="bar-fill" id="hp-bar" style="width: 100%"></div></div>
+                <div class="hp-bar"><div class="hp-bar-fill" id="hp-bar" style="width:100%"></div></div>
             </div>
             <div class="ui-panel">
                 <h3>MONEY</h3>
-                <div class="value" id="money-display" style="color: #00ff64;">150</div>
+                <div class="value" id="money-display" style="color:#00ff66">80</div>
             </div>
         </div>
 
         <div id="wave-timer">
             <div class="wave-label">WAVE <span id="wave-num">0</span></div>
-            <div class="timer" id="wave-timer-val">3:00</div>
+            <div class="timer" id="wave-timer-val">1:30</div>
         </div>
 
         <canvas id="minimap"></canvas>
 
         <div id="hotbar">
-            <div class="hotbar-slot active" data-slot="gun">
-                <span class="key">Q</span>
+            <div class="hotbar-slot active">
                 <span class="icon">🔫</span>
-                <span class="name">Gun</span>
-                <span class="ammo" id="ammo-display">50</span>
             </div>
         </div>
 
@@ -541,27 +325,27 @@
             <div class="build-option" data-type="wall">
                 <div class="key">1</div>
                 <div class="name">Wall</div>
-                <div class="cost">$50</div>
+                <div class="cost">$30</div>
             </div>
             <div class="build-option" data-type="turret">
                 <div class="key">2</div>
                 <div class="name">Turret</div>
-                <div class="cost">$100</div>
+                <div class="cost">$50</div>
             </div>
             <div class="build-option" data-type="dril">
                 <div class="key">3</div>
                 <div class="name">Dril</div>
-                <div class="cost">$150</div>
+                <div class="cost">$80</div>
             </div>
             <div class="build-option" data-type="mine">
                 <div class="key">4</div>
                 <div class="name">Mine</div>
-                <div class="cost">$75</div>
+                <div class="cost">$40</div>
             </div>
         </div>
     </div>
 
-    <!-- DEATH SCREEN -->
+    <!-- DEATH -->
     <div id="death-screen">
         <h1>ELIMINATED</h1>
         <button id="respawn-btn">RESPAWN</button>

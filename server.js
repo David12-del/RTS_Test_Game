@@ -10,602 +10,484 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================
-// GAME CONFIG
+// CONFIG
 // ============================================
 
 const CONFIG = {
-    MAP_WIDTH: 3000,
-    MAP_HEIGHT: 3000,
+    MAP_WIDTH: 2000,
+    MAP_HEIGHT: 2000,
+    PLAYER_SPEED: 4,
     PLAYER_RADIUS: 15,
-    PLAYER_SPEED: 5,
-    RESOURCE_COUNT: 25,
-    SPAWNER_COUNT: 8,
-    BUILD_HITBOXES: {
-        wall: { w: 40, h: 40 },
-        turret: { w: 30, h: 30 },
-        dril: { w: 40, h: 40 },
-        mine: { w: 24, h: 24 },
-        spawner: { w: 40, h: 40 },
-        command_center: { w: 80, h: 80 }
-    },
-    BUILD_COSTS: {
-        wall: 50,
-        turret: 100,
-        dril: 150,
-        mine: 75
-    },
-    BUILD_RANGE: 150,
-    WAVE_DELAY: 180
+    SPAWNER_COUNT: 4,
+    BASE_MONSTERS: 3,
+    MONSTERS_PER_PLAYER: 2,
+    WAVE_DELAY: 90,
+    BUILD_COSTS: { wall: 30, turret: 50, dril: 80, mine: 40 },
+    BUILD_RANGE: 120,
+    PASSIVE_INCOME: 2
 };
 
 // ============================================
-// GAME STATE
+// LOBBY SYSTEM
 // ============================================
 
-let gameState = {
-    status: 'waiting', // waiting, playing, paused
-    waveNumber: 0,
-    nextWaveTime: CONFIG.WAVE_DELAY,
-    players: {},
-    buildings: {},
-    monsters: [],
-    bullets: [],
-    resourcePoints: [],
-    commandCenter: null
-};
+const lobbies = new Map();
 
-let creatorId = null;
+function createLobby() {
+    const code = String(1000 + Math.floor(Math.random() * 9000));
+    const lobby = {
+        code,
+        creatorId: null,
+        status: 'waiting',
+        players: {},
+        buildings: {},
+        monsters: [],
+        bullets: [],
+        resourcePoints: [],
+        waveNumber: 0,
+        nextWaveTime: CONFIG.WAVE_DELAY
+    };
 
-// ============================================
-// INITIALIZATION
-// ============================================
-
-function generateResourcePoints() {
-    gameState.resourcePoints = [];
-    for (let i = 0; i < CONFIG.RESOURCE_COUNT; i++) {
-        gameState.resourcePoints.push({
+    // Resource points
+    for (let i = 0; i < 12; i++) {
+        lobby.resourcePoints.push({
             id: i,
-            x: 300 + Math.random() * (CONFIG.MAP_WIDTH - 600),
-            y: 300 + Math.random() * (CONFIG.MAP_HEIGHT - 600),
-            radius: 35
+            x: 150 + Math.random() * (CONFIG.MAP_WIDTH - 300),
+            y: 150 + Math.random() * (CONFIG.MAP_HEIGHT - 300),
+            radius: 25
         });
     }
-}
 
-function createCommandCenter() {
-    const id = 'command_center';
-    gameState.commandCenter = {
-        id,
-        type: 'command_center',
+    // Command Center
+    lobby.buildings['cc'] = {
+        id: 'cc', type: 'command_center',
         x: CONFIG.MAP_WIDTH / 2,
         y: CONFIG.MAP_HEIGHT / 2,
-        hp: 2000,
-        maxHp: 2000,
-        shootCooldown: 0,
-        laserAngle: 0
+        hp: 1000, maxHp: 1000, shootCooldown: 0
     };
-    gameState.buildings[id] = gameState.commandCenter;
-}
 
-function createSpawners() {
+    // Spawners
     for (let i = 0; i < CONFIG.SPAWNER_COUNT; i++) {
-        const x = 200 + Math.random() * (CONFIG.MAP_WIDTH - 400);
-        const y = 200 + Math.random() * (CONFIG.MAP_HEIGHT - 400);
-
-        if (Math.abs(x - CONFIG.MAP_WIDTH/2) < 200 && Math.abs(y - CONFIG.MAP_HEIGHT/2) < 200) {
-            continue;
+        const x = 100 + Math.random() * (CONFIG.MAP_WIDTH - 200);
+        const y = 100 + Math.random() * (CONFIG.MAP_HEIGHT - 200);
+        if (Math.abs(x - CONFIG.MAP_WIDTH/2) > 150 && Math.abs(y - CONFIG.MAP_HEIGHT/2) > 150) {
+            lobby.buildings['spawner_'+i] = { id: 'spawner_'+i, type: 'spawner', x, y, hp: 300, maxHp: 300 };
         }
-
-        const id = 'spawner_' + Date.now() + '_' + i;
-        gameState.buildings[id] = {
-            id,
-            type: 'spawner',
-            x,
-            y,
-            hp: 500,
-            maxHp: 500
-        };
     }
+
+    lobbies.set(code, lobby);
+    return lobby;
 }
-
-function resetGame() {
-    gameState.status = 'waiting';
-    gameState.waveNumber = 0;
-    gameState.nextWaveTime = CONFIG.WAVE_DELAY;
-    gameState.players = {};
-    gameState.buildings = {};
-    gameState.monsters = [];
-    gameState.bullets = [];
-    creatorId = null;
-
-    generateResourcePoints();
-    createCommandCenter();
-    createSpawners();
-}
-
-resetGame();
 
 // ============================================
 // SOCKET HANDLERS
 // ============================================
 
 io.on('connection', (socket) => {
-    console.log('Player connected:', socket.id);
+    console.log('Player:', socket.id);
+    let currentLobby = null;
 
-    socket.on('getGameState', () => {
-        socket.emit('gameStatus', {
-            status: gameState.status,
-            waveNumber: gameState.waveNumber,
-            nextWaveTime: gameState.nextWaveTime,
-            creatorId: creatorId,
-            playerCount: Object.keys(gameState.players).length
-        });
+    socket.on('createLobby', (data) => {
+        const lobby = createLobby();
+        lobby.creatorId = socket.id;
 
-        if (gameState.status !== 'waiting') {
-            socket.emit('init', {
-                id: socket.id,
-                mapWidth: CONFIG.MAP_WIDTH,
-                mapHeight: CONFIG.MAP_HEIGHT,
-                resourcePoints: gameState.resourcePoints,
-                buildingHitboxes: CONFIG.BUILD_HITBOXES,
-                playerRadius: CONFIG.PLAYER_RADIUS
-            });
-        }
+        const player = {
+            id: socket.id,
+            nickname: data.nickname || 'Player',
+            x: CONFIG.MAP_WIDTH/2 + (Math.random()-0.5)*40,
+            y: CONFIG.MAP_HEIGHT/2 + (Math.random()-0.5)*40,
+            hp: 100, maxHp: 100,
+            money: 80,
+            ammo: 30,
+            angle: 0,
+            incomeTimer: 0
+        };
+
+        lobby.players[socket.id] = player;
+        currentLobby = lobby;
+        socket.join(lobby.code);
+
+        socket.emit('lobbyCreated', { code: lobby.code, isCreator: true });
+        io.to(lobby.code).emit('lobbyUpdate', getLobbyInfo(lobby));
     });
 
-    socket.on('createGame', (nickname) => {
-        if (Object.keys(gameState.players).length === 0) {
-            creatorId = socket.id;
-            addPlayer(socket.id, nickname);
-            gameState.status = 'playing';
-            io.emit('gameStarted');
+    socket.on('joinLobby', (data) => {
+        const lobby = lobbies.get(data.code);
+        if (!lobby) {
+            socket.emit('error', 'Room not found');
+            return;
         }
-    });
 
-    socket.on('join', (nickname) => {
-        if (gameState.status === 'playing' || gameState.status === 'waiting') {
-            addPlayer(socket.id, nickname);
+        const player = {
+            id: socket.id,
+            nickname: data.nickname || 'Player',
+            x: CONFIG.MAP_WIDTH/2 + (Math.random()-0.5)*40,
+            y: CONFIG.MAP_HEIGHT/2 + (Math.random()-0.5)*40,
+            hp: 100, maxHp: 100,
+            money: 80,
+            ammo: 30,
+            angle: 0,
+            incomeTimer: 0
+        };
 
-            if (!creatorId && Object.keys(gameState.players).length === 1) {
-                creatorId = socket.id;
-            }
-        }
+        lobby.players[socket.id] = player;
+        currentLobby = lobby;
+        socket.join(lobby.code);
+
+        io.to(lobby.code).emit('lobbyUpdate', getLobbyInfo(lobby));
     });
 
     socket.on('startGame', () => {
-        if (socket.id === creatorId && gameState.status === 'waiting') {
-            if (Object.keys(gameState.players).length > 0) {
-                gameState.status = 'playing';
-                io.emit('gameStarted');
-            }
-        }
-    });
+        if (!currentLobby || currentLobby.creatorId !== socket.id) return;
+        if (Object.keys(currentLobby.players).length < 1) return;
 
-    socket.on('leaveGame', () => {
-        removePlayer(socket.id);
+        currentLobby.status = 'playing';
+        io.to(currentLobby.code).emit('gameStart', {
+            code: currentLobby.code,
+            mapWidth: CONFIG.MAP_WIDTH,
+            mapHeight: CONFIG.MAP_HEIGHT,
+            resourcePoints: currentLobby.resourcePoints
+        });
     });
 
     socket.on('move', (data) => {
-        const player = gameState.players[socket.id];
-        if (!player || player.hp <= 0) return;
+        if (!currentLobby || !currentLobby.players[socket.id]) return;
+        const p = currentLobby.players[socket.id];
+        if (p.hp <= 0) return;
 
-        player.x = Math.max(CONFIG.PLAYER_RADIUS, Math.min(CONFIG.MAP_WIDTH - CONFIG.PLAYER_RADIUS, data.x));
-        player.y = Math.max(CONFIG.PLAYER_RADIUS, Math.min(CONFIG.MAP_HEIGHT - CONFIG.PLAYER_RADIUS, data.y));
-        player.angle = data.angle || 0;
+        p.x = Math.max(15, Math.min(CONFIG.MAP_WIDTH - 15, data.x));
+        p.y = Math.max(15, Math.min(CONFIG.MAP_HEIGHT - 15, data.y));
+        p.angle = data.angle || 0;
     });
 
     socket.on('shoot', (data) => {
-        const player = gameState.players[socket.id];
-        if (!player || player.hp <= 0 || player.weapon !== 'gun') return;
-        if (player.ammo <= 0) return;
+        if (!currentLobby || !currentLobby.players[socket.id]) return;
+        const p = currentLobby.players[socket.id];
+        if (p.hp <= 0 || p.ammo <= 0) return;
 
-        player.ammo--;
+        p.ammo--;
 
         const bullet = {
-            id: 'bullet_' + Date.now() + '_' + Math.random(),
-            x: player.x,
-            y: player.y,
+            id: 'b_'+Date.now()+Math.random(),
+            x: p.x, y: p.y,
             angle: data.angle,
-            speed: 15,
+            speed: 12,
             ownerId: socket.id,
-            damage: 30,
+            damage: 20,
             life: 50,
             type: 'player'
         };
 
-        gameState.bullets.push(bullet);
-        io.emit('bulletCreated', bullet);
+        currentLobby.bullets.push(bullet);
+        io.to(currentLobby.code).emit('bulletCreated', bullet);
     });
 
     socket.on('build', (data) => {
-        const player = gameState.players[socket.id];
-        if (!player || player.hp <= 0) return;
+        if (!currentLobby || !currentLobby.players[socket.id]) return;
+        const p = currentLobby.players[socket.id];
+        if (p.hp <= 0) return;
 
         const cost = CONFIG.BUILD_COSTS[data.type];
-        if (!cost || player.money < cost) return;
-
-        if (data.type !== 'mine' && data.type !== 'dril') {
-            let nearBuilding = false;
-            for (const b of Object.values(gameState.buildings)) {
-                const dist = Math.sqrt(Math.pow(data.x - b.x, 2) + Math.pow(data.y - b.y, 2));
-                if (dist < CONFIG.BUILD_RANGE) {
-                    nearBuilding = true;
-                    break;
-                }
-            }
-            if (!nearBuilding) {
-                socket.emit('buildError', 'Too far from base! Build near existing buildings.');
-                return;
-            }
+        if (!cost || p.money < cost) {
+            socket.emit('buildError', 'Not enough money!');
+            return;
         }
 
+        // Check build range from existing buildings
+        let nearBase = false;
+        for (const b of Object.values(currentLobby.buildings)) {
+            const dist = Math.sqrt((data.x - b.x)**2 + (data.y - b.y)**2);
+            if (dist < CONFIG.BUILD_RANGE) { nearBase = true; break; }
+        }
+
+        if (!nearBase && data.type !== 'mine') {
+            socket.emit('buildError', 'Too far from base!');
+            return;
+        }
+
+        // Check resource for dril
         if (data.type === 'dril') {
-            const nearResource = gameState.resourcePoints.find(rp => {
-                const dx = rp.x - data.x;
-                const dy = rp.y - data.y;
-                return Math.sqrt(dx * dx + dy * dy) < rp.radius + 40;
-            });
-            if (!nearResource) {
-                socket.emit('buildError', 'Dril must be on resource point!');
+            const onResource = currentLobby.resourcePoints.some(rp =>
+                Math.sqrt((data.x - rp.x)**2 + (data.y - rp.y)**2) < rp.radius + 25
+            );
+            if (!onResource) {
+                socket.emit('buildError', 'Place on resource!');
                 return;
             }
         }
 
-        for (const existing of Object.values(gameState.buildings)) {
-            const dx = Math.abs(data.x - existing.x);
-            const dy = Math.abs(data.y - existing.y);
-            const minDist = 45;
-            if (dx < minDist && dy < minDist) {
-                socket.emit('buildError', 'Too close to another building!');
+        // Check collision with other buildings
+        for (const b of Object.values(currentLobby.buildings)) {
+            if (Math.abs(data.x - b.x) < 35 && Math.abs(data.y - b.y) < 35) {
+                socket.emit('buildError', 'Blocked!');
                 return;
             }
         }
 
-        player.money -= cost;
+        // Deduct money
+        p.money -= cost;
 
         const building = {
-            id: 'build_' + Date.now() + '_' + Math.random(),
+            id: 'build_'+Date.now()+Math.random(),
             type: data.type,
-            x: data.x,
-            y: data.y,
-            hp: data.type === 'wall' ? 200 : (data.type === 'turret' ? 100 : 150),
-            maxHp: data.type === 'wall' ? 200 : (data.type === 'turret' ? 100 : 150),
+            x: data.x, y: data.y,
+            hp: data.type==='wall'?150:(data.type==='turret'?80:100),
+            maxHp: data.type==='wall'?150:(data.type==='turret'?80:100),
             ownerId: socket.id,
             shootCooldown: 0
         };
 
-        gameState.buildings[building.id] = building;
-        io.emit('buildingCreated', building);
+        currentLobby.buildings[building.id] = building;
+        io.to(currentLobby.code).emit('buildingCreated', building);
     });
 
     socket.on('disconnect', () => {
-        removePlayer(socket.id);
+        if (currentLobby && currentLobby.players[socket.id]) {
+            delete currentLobby.players[socket.id];
+            io.to(currentLobby.code).emit('playerLeft', socket.id);
+
+            if (Object.keys(currentLobby.players).length === 0) {
+                lobbies.delete(currentLobby.code);
+            } else if (currentLobby.creatorId === socket.id) {
+                currentLobby.creatorId = Object.keys(currentLobby.players)[0];
+                io.to(currentLobby.code).emit('newCreator', currentLobby.creatorId);
+            }
+
+            io.to(currentLobby.code).emit('lobbyUpdate', getLobbyInfo(currentLobby));
+        }
     });
 });
 
-function addPlayer(id, nickname) {
-    const spawnPoint = gameState.commandCenter || { x: CONFIG.MAP_WIDTH/2, y: CONFIG.MAP_HEIGHT/2 };
-
-    gameState.players[id] = {
-        id,
-        nickname: nickname || 'Player',
-        x: spawnPoint.x + (Math.random() - 0.5) * 60,
-        y: spawnPoint.y + (Math.random() - 0.5) * 60,
-        hp: 100,
-        maxHp: 100,
-        money: 150,
-        ammo: 50,
-        weapon: 'gun',
-        angle: 0,
-        speed: CONFIG.PLAYER_SPEED
+function getLobbyInfo(lobby) {
+    return {
+        code: lobby.code,
+        players: Object.values(lobby.players).map(p => ({ id: p.id, nickname: p.nickname })),
+        status: lobby.status,
+        creatorId: lobby.creatorId
     };
-
-    io.emit('playerJoined', gameState.players[id]);
-}
-
-function removePlayer(id) {
-    if (gameState.players[id]) {
-        delete gameState.players[id];
-        io.emit('playerLeft', id);
-
-        if (Object.keys(gameState.players).length === 0) {
-            gameState.status = 'paused';
-        } else if (id === creatorId) {
-            creatorId = Object.keys(gameState.players)[0];
-            io.emit('newCreator', creatorId);
-        }
-    }
 }
 
 // ============================================
 // GAME LOOPS
 // ============================================
 
-function spawnMonster(x, y, type = 'basic') {
-    const monster = {
-        id: 'monster_' + Date.now() + '_' + Math.random(),
-        type,
-        x,
-        y,
-        hp: type === 'basic' ? 30 : 80,
-        maxHp: type === 'basic' ? 30 : 80,
-        speed: type === 'basic' ? 2 : 1.2,
-        damage: type === 'basic' ? 8 : 15,
-        attackCooldown: 0
-    };
-    gameState.monsters.push(monster);
-    io.emit('monsterCreated', monster);
-}
-
-function startWave() {
-    gameState.waveNumber++;
-    const spawnerCount = Object.values(gameState.buildings).filter(b => b.type === 'spawner').length;
-    const monsterCount = gameState.waveNumber * 4 + spawnerCount * 2;
-
-    io.emit('waveStart', { wave: gameState.waveNumber, monsterCount });
-
-    const spawners = Object.values(gameState.buildings).filter(b => b.type === 'spawner');
-    if (spawners.length === 0) return;
-
-    for (let i = 0; i < monsterCount; i++) {
-        const spawner = spawners[Math.floor(Math.random() * spawners.length)];
-        setTimeout(() => {
-            spawnMonster(
-                spawner.x + (Math.random() - 0.5) * 60,
-                spawner.y + (Math.random() - 0.5) * 60,
-                gameState.waveNumber >= 3 && Math.random() > 0.6 ? 'strong' : 'basic'
-            );
-        }, i * 400);
-    }
-}
-
-// Timer loop
 setInterval(() => {
-    if (gameState.status !== 'playing') return;
+    lobbies.forEach(lobby => {
+        if (lobby.status !== 'playing') return;
+        if (Object.keys(lobby.players).length === 0) { lobby.status = 'paused'; return; }
 
-    gameState.nextWaveTime--;
-
-    if (gameState.nextWaveTime <= 0) {
-        startWave();
-        gameState.nextWaveTime = CONFIG.WAVE_DELAY + gameState.waveNumber * 30;
-    }
-
-    io.emit('timer', { nextWaveTime: gameState.nextWaveTime, waveNumber: gameState.waveNumber });
+        lobby.nextWaveTime--;
+        if (lobby.nextWaveTime <= 0) { startWave(lobby); lobby.nextWaveTime = CONFIG.WAVE_DELAY; }
+        io.to(lobby.code).emit('timer', { nextWaveTime: lobby.nextWaveTime, waveNumber: lobby.waveNumber });
+    });
 }, 1000);
 
-// Buildings loop
 setInterval(() => {
-    if (gameState.status !== 'playing') return;
+    lobbies.forEach(lobby => {
+        if (lobby.status !== 'playing') return;
 
-    for (const building of Object.values(gameState.buildings)) {
-        if (building.type === 'mine' || building.type === 'dril') {
-            building.spawnTimer = (building.spawnTimer || 0) + 1;
-            const rate = building.type === 'dril' ? 5 : 10;
-            if (building.spawnTimer >= rate) {
-                building.spawnTimer = 0;
-                const income = building.type === 'dril' ? 30 : 8;
-                const owner = gameState.players[building.ownerId];
-                if (owner) {
-                    owner.money += income;
-                }
-                io.emit('resourceGenerated', { buildingId: building.id, amount: income });
-            }
-        }
-
-        if (building.type === 'turret') {
-            building.shootCooldown = Math.max(0, building.shootCooldown - 1);
-            if (building.shootCooldown <= 0) {
-                const target = gameState.monsters.find(m => {
-                    const dx = m.x - building.x;
-                    const dy = m.y - building.y;
-                    return Math.sqrt(dx * dx + dy * dy) < 350;
-                });
-                if (target) {
-                    building.shootCooldown = 25;
-                    const bullet = {
-                        id: 'turret_' + Date.now() + '_' + Math.random(),
-                        x: building.x,
-                        y: building.y,
-                        angle: Math.atan2(target.y - building.y, target.x - building.x),
-                        speed: 12,
-                        ownerId: building.ownerId,
-                        damage: 20,
-                        life: 35,
-                        type: 'turret'
-                    };
-                    gameState.bullets.push(bullet);
-                    io.emit('bulletCreated', bullet);
-                }
-            }
-        }
-
-        if (building.type === 'command_center') {
-            building.shootCooldown = Math.max(0, building.shootCooldown - 1);
-            building.laserAngle = (building.laserAngle || 0) + 0.05;
-
-            if (building.shootCooldown <= 0) {
-                const target = gameState.monsters.find(m => {
-                    const dx = m.x - building.x;
-                    const dy = m.y - building.y;
-                    return Math.sqrt(dx * dx + dy * dy) < 400;
-                });
-                if (target) {
-                    building.shootCooldown = 8;
-
-                    gameState.bullets.push({
-                        id: 'laser_' + Date.now() + '_' + Math.random(),
-                        x: building.x,
-                        y: building.y,
-                        angle: Math.atan2(target.y - building.y, target.x - building.x),
-                        speed: 25,
-                        ownerId: 'command_center',
-                        damage: 50,
-                        life: 20,
-                        type: 'laser',
-                        targetId: target.id
-                    });
-                    io.emit('bulletCreated', gameState.bullets[gameState.bullets.length - 1]);
-                }
-            }
-        }
-    }
-}, 50);
-
-// Bullets loop
-setInterval(() => {
-    if (gameState.status !== 'playing') return;
-
-    for (let i = gameState.bullets.length - 1; i >= 0; i--) {
-        const b = gameState.bullets[i];
-        b.x += Math.cos(b.angle) * b.speed;
-        b.y += Math.sin(b.angle) * b.speed;
-        b.life--;
-
-        if (b.life <= 0 || b.x < 0 || b.x > CONFIG.MAP_WIDTH || b.y < 0 || b.y > CONFIG.MAP_HEIGHT) {
-            gameState.bullets.splice(i, 1);
-            io.emit('bulletRemoved', b.id);
-            continue;
-        }
-
-        for (let j = gameState.monsters.length - 1; j >= 0; j--) {
-            const m = gameState.monsters[j];
-            const hitRadius = b.type === 'laser' ? 30 : 18;
-            if (Math.sqrt(Math.pow(m.x - b.x, 2) + Math.pow(m.y - b.y, 2)) < hitRadius) {
-                m.hp -= b.damage;
-                gameState.bullets.splice(i, 1);
-                io.emit('bulletRemoved', b.id);
-
-                if (m.hp <= 0) {
-                    const reward = m.type === 'strong' ? 25 : 15;
-                    if (b.ownerId && gameState.players[b.ownerId]) {
-                        gameState.players[b.ownerId].money += reward;
-                    } else if (b.ownerId === 'command_center') {
-                        Object.values(gameState.players).forEach(p => p.money += reward);
-                    }
-                    gameState.monsters.splice(j, 1);
-                    io.emit('monsterRemoved', m.id);
-                }
-                break;
-            }
-        }
-    }
-}, 50);
-
-// Monsters loop
-setInterval(() => {
-    if (gameState.status !== 'playing') return;
-
-    for (const monster of gameState.monsters) {
-        monster.attackCooldown = Math.max(0, monster.attackCooldown - 1);
-
-        let target = null;
-        let minDist = Infinity;
-
-        for (const p of Object.values(gameState.players)) {
+        // Passive income
+        Object.values(lobby.players).forEach(p => {
             if (p.hp > 0) {
-                const dist = Math.sqrt(Math.pow(p.x - monster.x, 2) + Math.pow(p.y - monster.y, 2));
-                if (dist < minDist) {
-                    minDist = dist;
-                    target = p;
-                }
+                p.incomeTimer = (p.incomeTimer || 0) + 1;
+                if (p.incomeTimer >= 10) { p.incomeTimer = 0; p.money += CONFIG.PASSIVE_INCOME; }
+            }
+        });
+
+        // Command Center laser
+        const cc = lobby.buildings['cc'];
+        cc.shootCooldown = Math.max(0, cc.shootCooldown - 1);
+        if (cc.shootCooldown <= 0) {
+            const target = lobby.monsters.find(m => Math.sqrt((m.x-cc.x)**2 + (m.y-cc.y)**2) < 300);
+            if (target) {
+                cc.shootCooldown = 12;
+                const angle = Math.atan2(target.y - cc.y, target.x - cc.x);
+                lobby.bullets.push({
+                    id: 'laser_'+Date.now()+Math.random(),
+                    x: cc.x, y: cc.y, angle, speed: 20,
+                    ownerId: 'cc', damage: 40, life: 15, type: 'laser'
+                });
+                io.to(lobby.code).emit('bulletCreated', lobby.bullets[lobby.bullets.length-1]);
             }
         }
 
-        if (!target) {
-            const cc = gameState.commandCenter;
-            if (cc) {
-                const dist = Math.sqrt(Math.pow(cc.x - monster.x, 2) + Math.pow(cc.y - monster.y, 2));
-                if (dist < 500) {
-                    minDist = dist;
-                    target = cc;
+        // Turrets
+        Object.values(lobby.buildings).filter(b => b.type === 'turret').forEach(t => {
+            t.shootCooldown = Math.max(0, t.shootCooldown - 1);
+            if (t.shootCooldown <= 0) {
+                const target = lobby.monsters.find(m => Math.sqrt((m.x-t.x)**2 + (m.y-t.y)**2) < 250);
+                if (target) {
+                    t.shootCooldown = 25;
+                    const angle = Math.atan2(target.y - t.y, target.x - t.x);
+                    lobby.bullets.push({
+                        id: 'turret_'+Date.now()+Math.random(),
+                        x: t.x, y: t.y, angle, speed: 10,
+                        ownerId: t.ownerId, damage: 15, life: 30, type: 'turret'
+                    });
+                    io.to(lobby.code).emit('bulletCreated', lobby.bullets[lobby.bullets.length-1]);
+                }
+            }
+        });
+
+        // Resource buildings
+        Object.values(lobby.buildings).filter(b => b.type === 'mine' || b.type === 'dril').forEach(b => {
+            b.spawnTimer = (b.spawnTimer || 0) + 1;
+            const rate = b.type === 'dril' ? 5 : 8;
+            if (b.spawnTimer >= rate) {
+                b.spawnTimer = 0;
+                const income = b.type === 'dril' ? 15 : 5;
+                const owner = lobby.players[b.ownerId];
+                if (owner) owner.money += income;
+                io.to(lobby.code).emit('resourceGenerated', { buildingId: b.id, amount: income });
+            }
+        });
+    });
+}, 50);
+
+setInterval(() => {
+    lobbies.forEach(lobby => {
+        if (lobby.status !== 'playing') return;
+
+        // Bullets
+        for (let i = lobby.bullets.length - 1; i >= 0; i--) {
+            const b = lobby.bullets[i];
+            b.x += Math.cos(b.angle) * b.speed;
+            b.y += Math.sin(b.angle) * b.speed;
+            b.life--;
+
+            if (b.life <= 0 || b.x < 0 || b.x > CONFIG.MAP_WIDTH || b.y < 0 || b.y > CONFIG.MAP_HEIGHT) {
+                lobby.bullets.splice(i, 1);
+                io.to(lobby.code).emit('bulletRemoved', b.id);
+                continue;
+            }
+
+            // Monster hits
+            for (let j = lobby.monsters.length - 1; j >= 0; j--) {
+                const m = lobby.monsters[j];
+                const dist = Math.sqrt((m.x-b.x)**2 + (m.y-b.y)**2);
+                if (dist < (b.type === 'laser' ? 20 : 12)) {
+                    m.hp -= b.damage;
+                    lobby.bullets.splice(i, 1);
+                    io.to(lobby.code).emit('bulletRemoved', b.id);
+
+                    if (m.hp <= 0) {
+                        const reward = m.type === 'strong' ? 15 : 8;
+                        if (b.ownerId && lobby.players[b.ownerId]) lobby.players[b.ownerId].money += reward;
+                        lobby.monsters.splice(j, 1);
+                        io.to(lobby.code).emit('monsterRemoved', m.id);
+                    }
+                    break;
                 }
             }
         }
+    });
+}, 50);
 
-        for (const b of Object.values(gameState.buildings)) {
-            if (b.type === 'wall') {
-                const dist = Math.sqrt(Math.pow(b.x - monster.x, 2) + Math.pow(b.y - monster.y, 2));
-                if (dist < minDist && dist < 400) {
-                    minDist = dist;
-                    target = b;
+setInterval(() => {
+    lobbies.forEach(lobby => {
+        if (lobby.status !== 'playing') return;
+
+        // Monsters
+        lobby.monsters.forEach(m => {
+            m.attackCooldown = Math.max(0, m.attackCooldown - 1);
+
+            // Find target
+            let target = null, minDist = Infinity;
+
+            Object.values(lobby.players).forEach(p => {
+                if (p.hp > 0) {
+                    const d = Math.sqrt((p.x-m.x)**2 + (p.y-m.y)**2);
+                    if (d < minDist) { minDist = d; target = p; }
                 }
+            });
+
+            if (!target) {
+                const cc = lobby.buildings['cc'];
+                const d = Math.sqrt((cc.x-m.x)**2 + (cc.y-m.y)**2);
+                if (d < 350) { minDist = d; target = cc; }
             }
-        }
 
-        if (target) {
-            const angle = Math.atan2(target.y - monster.y, target.x - monster.x);
-            const attackDist = target.hp !== undefined ? 25 : 35;
+            if (target) {
+                const angle = Math.atan2(target.y - m.y, target.x - m.x);
+                const attackDist = target.hp !== undefined ? 20 : 25;
 
-            if (minDist > attackDist) {
-                let newX = monster.x + Math.cos(angle) * monster.speed;
-                let newY = monster.y + Math.sin(angle) * monster.speed;
-
-                let blocked = false;
-                for (const b of Object.values(gameState.buildings)) {
-                    if (b.type === 'wall') {
-                        if (Math.abs(newX - b.x) < 32 && Math.abs(newY - b.y) < 32) {
-                            blocked = true;
-                            b.hp -= 3;
-                            if (b.hp <= 0) {
-                                delete gameState.buildings[b.id];
-                                io.emit('buildingRemoved', b.id);
+                if (minDist > attackDist) {
+                    let blocked = false;
+                    for (const b of Object.values(lobby.buildings)) {
+                        if (b.type === 'wall') {
+                            if (Math.abs(m.x + Math.cos(angle)*m.speed - b.x) < 28 && Math.abs(m.y + Math.sin(angle)*m.speed - b.y) < 28) {
+                                blocked = true;
+                                b.hp -= 2;
+                                if (b.hp <= 0) { delete lobby.buildings[b.id]; io.to(lobby.code).emit('buildingRemoved', b.id); }
+                                break;
                             }
-                            break;
+                        }
+                    }
+                    if (!blocked) { m.x += Math.cos(angle) * m.speed; m.y += Math.sin(angle) * m.speed; }
+                } else if (m.attackCooldown <= 0) {
+                    m.attackCooldown = 45;
+                    target.hp -= m.damage;
+                    if (target.hp <= 0) {
+                        if (lobby.players[target.id]) {
+                            lobby.players[target.id].hp = lobby.players[target.id].maxHp;
+                            lobby.players[target.id].x = lobby.buildings['cc'].x + (Math.random()-0.5)*40;
+                            lobby.players[target.id].y = lobby.buildings['cc'].y + (Math.random()-0.5)*40;
+                            io.to(lobby.code).emit('playerRespawned', target.id);
+                        } else if (target.type === 'command_center') {
+                            target.hp = target.maxHp;
                         }
                     }
                 }
-
-                if (!blocked) {
-                    monster.x = newX;
-                    monster.y = newY;
-                }
-            } else if (monster.attackCooldown <= 0) {
-                monster.attackCooldown = 50;
-                target.hp -= monster.damage;
-
-                if (target.hp <= 0) {
-                    if (gameState.players[target.id]) {
-                        gameState.players[target.id].hp = target.maxHp;
-                        gameState.players[target.id].x = gameState.commandCenter.x + (Math.random() - 0.5) * 60;
-                        gameState.players[target.id].y = gameState.commandCenter.y + (Math.random() - 0.5) * 60;
-                        io.emit('playerRespawned', target.id);
-                    } else if (target.type === 'command_center') {
-                        target.hp = target.maxHp;
-                    }
-                }
             }
-        }
-    }
-}, 50);
+        });
 
-// Wall regeneration
-setInterval(() => {
-    for (const b of Object.values(gameState.buildings)) {
-        if (b.type === 'wall' && b.hp < b.maxHp) {
-            b.hp = Math.min(b.maxHp, b.hp + 0.3);
-        }
-    }
+        // Wall regen
+        Object.values(lobby.buildings).filter(b => b.type === 'wall' && b.hp < b.maxHp).forEach(b => {
+            b.hp = Math.min(b.maxHp, b.hp + 0.15);
+        });
+
+        // Sync
+        io.to(lobby.code).emit('gameState', {
+            players: lobby.players,
+            buildings: Object.values(lobby.buildings),
+            monsters: lobby.monsters,
+            bullets: lobby.bullets,
+            wave: lobby.waveNumber,
+            status: lobby.status
+        });
+    });
 }, 100);
 
-// Sync loop
-setInterval(() => {
-    const sendState = {
-        players: gameState.players,
-        buildings: Object.values(gameState.buildings),
-        monsters: gameState.monsters,
-        bullets: gameState.bullets,
-        wave: gameState.waveNumber,
-        nextWaveTime: gameState.nextWaveTime,
-        status: gameState.status
-    };
-    io.emit('gameState', sendState);
-}, 100);
+function startWave(lobby) {
+    lobby.waveNumber++;
+    const spawners = Object.values(lobby.buildings).filter(b => b.type === 'spawner');
+    if (!spawners.length) return;
+
+    const playerCount = Object.keys(lobby.players).length;
+    const count = CONFIG.BASE_MONSTERS + lobby.waveNumber * 2 + playerCount * CONFIG.MONSTERS_PER_PLAYER;
+
+    io.to(lobby.code).emit('waveStart', { wave: lobby.waveNumber, monsterCount: count });
+
+    for (let i = 0; i < count; i++) {
+        const sp = spawners[Math.floor(Math.random() * spawners.length)];
+        setTimeout(() => {
+            const type = lobby.waveNumber >= 3 && Math.random() > 0.7 ? 'strong' : 'basic';
+            lobby.monsters.push({
+                id: 'm_'+Date.now()+Math.random(),
+                type, x: sp.x + (Math.random()-0.5)*30, y: sp.y + (Math.random()-0.5)*30,
+                hp: type==='basic'?20:50, maxHp: type==='basic'?20:50,
+                speed: type==='basic'?1.8:1.2,
+                damage: type==='basic'?6:12,
+                attackCooldown: 0
+            });
+            io.to(lobby.code).emit('monsterCreated', lobby.monsters[lobby.monsters.length-1]);
+        }, i * 250);
+    }
+}
 
 // ============================================
-// START SERVER
+// START
 // ============================================
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server: ${PORT}`));
